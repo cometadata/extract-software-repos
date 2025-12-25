@@ -118,7 +118,7 @@ def extract_urls_native(
         # Filter out nulls (no matches)
         exploded = exploded.filter(pl.col("url").is_not_null())
 
-        if len(exploded) > 0:
+        if not exploded.is_empty():
             all_extractions.append(exploded)
 
     # Combine all extractions
@@ -335,22 +335,6 @@ def extract_urls_polars_native(
     ])
 
     return result
-
-
-def _extract_and_normalize_urls(text: str) -> List[Dict[str, str]]:
-    """Extract and normalize URLs from text.
-
-    Args:
-        text: Text to search for URLs.
-
-    Returns:
-        List of dicts with 'url' and 'type' keys.
-    """
-    if not text:
-        return []
-
-    # Reuse existing extraction logic which handles all normalization and deduplication
-    return extract_urls_with_types(text)
 
 
 def extract_urls_polars_df(
