@@ -97,10 +97,10 @@ def extract_software(records_file: Path, output: Path, log_level: str):
     help="Output JSONL file (default: <input>_urls.jsonl)"
 )
 @click.option(
-    "--batch-size", "-b",
+    "--chunk-size", "-c",
     type=int,
-    default=1000,
-    help="Rows per batch for memory efficiency (default: 1000)"
+    default=50000,
+    help="Rows per processing chunk (default: 50000)"
 )
 @click.option(
     "--id-field",
@@ -128,7 +128,7 @@ def extract_software(records_file: Path, output: Path, log_level: str):
 def extract_urls(
     parquet_file: Path,
     output: Optional[Path],
-    batch_size: int,
+    chunk_size: int,
     id_field: str,
     content_field: str,
     heal_markdown: bool,
@@ -138,15 +138,15 @@ def extract_urls(
 
     PARQUET_FILE: Path to parquet file with arxiv content.
 
-    Extracts software repository URLs from full-text papers.
+    Uses Polars for high-performance parallel processing.
 
     Example:
         extract-software-repos extract-urls arxiv.parquet -o urls.jsonl
         extract-software-repos extract-urls arxiv.parquet --heal-markdown
     """
-    import pyarrow.parquet as pq
+    import polars as pl
     from tqdm import tqdm
-    from .processing import process_parquet_with_progress
+    from .polars_extraction import process_parquet_polars
 
     _setup_logging(log_level)
 
@@ -157,8 +157,8 @@ def extract_urls(
     click.echo(f"Extracting URLs from {parquet_file}{heal_status}")
     click.echo(f"Output: {output}")
 
-    pf = pq.ParquetFile(parquet_file)
-    total_rows = pf.metadata.num_rows
+    # Get total rows for progress bar
+    total_rows = pl.scan_parquet(parquet_file).select(pl.len()).collect().item()
 
     pbar = tqdm(total=total_rows, desc="Processing papers", unit="papers")
     last_processed = 0
@@ -169,20 +169,17 @@ def extract_urls(
         last_processed = papers_processed
         pbar.set_postfix({"with_urls": papers_with_urls, "urls": total_urls})
 
-    results, stats = process_parquet_with_progress(
+    stats = process_parquet_polars(
         parquet_file,
-        progress_callback=progress_callback,
-        batch_size=batch_size,
+        output,
         id_field=id_field,
         content_field=content_field,
+        chunk_size=chunk_size,
         heal_markdown=heal_markdown,
+        progress_callback=progress_callback,
     )
 
     pbar.close()
-
-    with open(output, "w", encoding="utf-8") as f:
-        for result in results:
-            f.write(json.dumps(result, ensure_ascii=False) + "\n")
 
     click.echo(f"\nExtraction complete!")
     click.echo(f"  Total papers: {stats['total_papers']:,}")
@@ -331,10 +328,16 @@ def validate(
     help="Column containing text (auto-detected if not specified)"
 )
 @click.option(
-    "--batch-size", "-b",
+    "--workers", "-w",
+    type=int,
+    default=None,
+    help="Number of parallel workers (default: CPU count)"
+)
+@click.option(
+    "--chunk-size", "-c",
     type=int,
     default=1000,
-    help="Rows per batch (default: 1000)"
+    help="Rows per chunk (default: 1000)"
 )
 @click.option(
     "--log-level",
@@ -346,22 +349,22 @@ def heal_text_cmd(
     parquet_file: Path,
     output: Optional[Path],
     content_field: Optional[str],
-    batch_size: int,
+    workers: Optional[int],
+    chunk_size: int,
     log_level: str,
 ):
     """Heal malformed markdown in parquet file.
 
     PARQUET_FILE: Path to parquet file with text content.
 
-    Cleans PDF-extracted text: fixes hyphenation, merges broken lines,
-    removes repeated headers/footers, normalizes formatting.
+    Uses multiprocessing for parallel healing across CPU cores.
 
     Example:
         extract-software-repos heal-text arxiv.parquet -o cleaned.parquet
+        extract-software-repos heal-text arxiv.parquet --workers 8
     """
-    import pandas as pd
-    from tqdm import tqdm
-    from .healing import heal_text
+    import polars as pl
+    from .healing import heal_parquet_parallel
 
     _setup_logging(log_level)
 
@@ -371,46 +374,42 @@ def heal_text_cmd(
     click.echo(f"Healing text in {parquet_file}")
     click.echo(f"Output: {output}")
 
-    df = pd.read_parquet(parquet_file)
-
+    # Auto-detect content field if not specified
     if content_field is None:
+        df_schema = pl.read_parquet_schema(parquet_file)
         content_candidates = ['content', 'text', 'markdown', 'md', 'body']
         for candidate in content_candidates:
-            if candidate in df.columns:
+            if candidate in df_schema:
                 content_field = candidate
                 break
 
-    if content_field is None or content_field not in df.columns:
-        click.echo(f"Error: Could not detect content column. Available: {list(df.columns)}")
+    if content_field is None:
+        df_schema = pl.read_parquet_schema(parquet_file)
+        click.echo(f"Error: Could not detect content column. Available: {list(df_schema.keys())}")
         raise SystemExit(1)
 
     click.echo(f"Using content column: {content_field}")
-    click.echo(f"Processing {len(df):,} documents...")
 
-    healed_content = []
-    heal_warnings = []
-    warning_count = 0
+    # Get row count
+    total_rows = pl.scan_parquet(parquet_file).select(pl.len()).collect().item()
+    click.echo(f"Processing {total_rows:,} documents...")
 
-    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Healing"):
-        content = row[content_field] or ""
-        healed, warnings = heal_text(content)
+    from multiprocessing import cpu_count
+    actual_workers = workers or cpu_count()
+    click.echo(f"Using {actual_workers} parallel workers")
 
-        healed_content.append(healed)
-        heal_warnings.append("; ".join(warnings) if warnings else "")
-
-        if warnings:
-            warning_count += 1
-
-    df[content_field] = healed_content
-    df["_heal_warnings"] = heal_warnings
-    df.to_parquet(output, index=False)
-
-    successful = len(df) - warning_count
+    stats = heal_parquet_parallel(
+        parquet_file,
+        output,
+        content_field=content_field,
+        workers=workers,
+        chunk_size=chunk_size,
+    )
 
     click.echo(f"\nHealing complete!")
-    click.echo(f"  Total documents:     {len(df):,}")
-    click.echo(f"  Successfully healed: {successful:,}")
-    click.echo(f"  With warnings:       {warning_count:,}")
+    click.echo(f"  Total documents:     {stats['total']:,}")
+    click.echo(f"  Successfully healed: {stats['healed']:,}")
+    click.echo(f"  With warnings:       {stats['warnings']:,}")
     click.echo(f"  Output: {output}")
 
 

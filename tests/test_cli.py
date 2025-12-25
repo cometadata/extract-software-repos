@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+import polars as pl
 from click.testing import CliRunner
 
 from extract_software_repos.cli import cli
@@ -67,3 +68,47 @@ class TestValidateCommand:
         result = runner.invoke(cli, ["validate", "--help"])
         assert result.exit_code == 0
         assert "Validate extracted URLs" in result.output
+
+
+class TestUpdatedCLI:
+    """Test updated CLI with Polars backend."""
+
+    def test_extract_urls_uses_polars(self, runner):
+        df = pl.DataFrame({
+            "relative_path": ["2308.11197v1.md"],
+            "content": ["Check https://github.com/user/repo"]
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = Path(tmpdir) / "test.parquet"
+            output_path = Path(tmpdir) / "output.jsonl"
+            df.write_parquet(input_path)
+
+            result = runner.invoke(cli, [
+                "extract-urls",
+                str(input_path),
+                "-o", str(output_path),
+            ])
+
+            assert result.exit_code == 0
+            assert output_path.exists()
+
+    def test_heal_text_parallel(self, runner):
+        df = pl.DataFrame({
+            "content": ["Some text with git-\nhub.com link"]
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = Path(tmpdir) / "test.parquet"
+            output_path = Path(tmpdir) / "healed.parquet"
+            df.write_parquet(input_path)
+
+            result = runner.invoke(cli, [
+                "heal-text",
+                str(input_path),
+                "-o", str(output_path),
+                "--workers", "2",
+            ])
+
+            assert result.exit_code == 0
+            assert output_path.exists()
