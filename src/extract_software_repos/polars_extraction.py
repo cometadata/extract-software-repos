@@ -18,6 +18,28 @@ SPACED_DOMAINS = [
     ("sourceforge.net", r"s\s*o\s*u\s*r\s*c\s*e\s*f\s*o\s*r\s*g\s*e\s*\.\s*n\s*e\s*t"),
 ]
 
+# URL patterns for Polars str.extract_all() - each returns full URL match
+POLARS_URL_PATTERNS = {
+    # Code repositories
+    "github": r"(?:https?://)?(?:www\.)?github\.com/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(?:/[^\s)\"'<>]*)?",
+    "gitlab": r"(?:https?://)?(?:www\.)?gitlab\.com/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(?:/[^\s)\"'<>]*)?",
+    "bitbucket": r"(?:https?://)?(?:www\.)?bitbucket\.org/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(?:/[^\s)\"'<>]*)?",
+    "sourceforge": r"(?:https?://)?(?:www\.)?sourceforge\.net/projects/[a-zA-Z0-9_-]+",
+    "codeberg": r"(?:https?://)?(?:www\.)?codeberg\.org/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(?:/[^\s)\"'<>]*)?",
+    # Package registries
+    "pypi": r"(?:https?://)?pypi\.org/project/[a-zA-Z0-9_-]+",
+    "cran": r"(?:https?://)?cran\.r-project\.org/package=[a-zA-Z0-9_.]+",
+    "npm": r"(?:https?://)?(?:www\.)?npmjs\.com/package/[a-zA-Z0-9@/._-]+",
+    "conda": r"(?:https?://)?anaconda\.org/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+",
+    "rubygems": r"(?:https?://)?rubygems\.org/gems/[a-zA-Z0-9_-]+",
+    "cargo": r"(?:https?://)?crates\.io/crates/[a-zA-Z0-9_-]+",
+    "packagist": r"(?:https?://)?packagist\.org/packages/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+",
+    "bioconductor": r"(?:https?://)?bioconductor\.org/packages/[a-zA-Z0-9_.]+",
+    # Archives
+    "software_heritage": r"(?:https?://)?archive\.softwareheritage\.org/[^\s)\"'<>]+",
+    "codeocean": r"(?:https?://)?codeocean\.com/capsule/[a-zA-Z0-9_-]+",
+}
+
 
 def preprocess_content(col: str) -> pl.Expr:
     """Create Polars expression for text preprocessing.

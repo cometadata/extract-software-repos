@@ -145,3 +145,21 @@ class TestPolarsParquetProcessing:
             )
 
             assert len(progress_calls) >= 1
+
+
+class TestPolarsPatterns:
+    """Test Polars URL patterns."""
+
+    def test_patterns_dict_exists(self):
+        from extract_software_repos.polars_extraction import POLARS_URL_PATTERNS
+        assert isinstance(POLARS_URL_PATTERNS, dict)
+        assert "github" in POLARS_URL_PATTERNS
+        assert "pypi" in POLARS_URL_PATTERNS
+
+    def test_pattern_matches_github(self):
+        import re
+        from extract_software_repos.polars_extraction import POLARS_URL_PATTERNS
+        pattern = POLARS_URL_PATTERNS["github"]
+        match = re.search(pattern, "see https://github.com/user/repo for code")
+        assert match is not None
+        assert "github.com/user/repo" in match.group(0)
