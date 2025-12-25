@@ -407,3 +407,51 @@ class TestDeduplication:
         result = deduplicate_urls(df)
         # Same URL in different docs should both be kept
         assert len(result) == 2
+
+
+class TestRegrouping:
+    """Test URL regrouping."""
+
+    def test_regroup_urls_exists(self):
+        from extract_software_repos.polars_extraction import regroup_urls
+        assert callable(regroup_urls)
+
+    def test_regroup_creates_list_column(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import regroup_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1", "doc1"],
+            "url": ["https://github.com/user/repo", "https://pypi.org/project/pkg"],
+            "type": ["github", "pypi"],
+        })
+        result = regroup_urls(df)
+        assert "urls" in result.columns
+        assert result["urls"].dtype == pl.List
+
+    def test_regroup_one_row_per_doc(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import regroup_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1", "doc1", "doc2"],
+            "url": ["https://github.com/user/repo", "https://pypi.org/project/pkg", "https://gitlab.com/team/proj"],
+            "type": ["github", "pypi", "gitlab"],
+        })
+        result = regroup_urls(df)
+        assert len(result) == 2
+
+    def test_regroup_preserves_url_and_type(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import regroup_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1"],
+            "url": ["https://github.com/user/repo"],
+            "type": ["github"],
+        })
+        result = regroup_urls(df)
+        urls_list = result["urls"][0]
+        assert len(urls_list) == 1
+        assert urls_list[0]["url"] == "https://github.com/user/repo"
+        assert urls_list[0]["type"] == "github"

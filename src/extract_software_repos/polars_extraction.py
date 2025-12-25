@@ -253,6 +253,20 @@ def deduplicate_urls(df: pl.DataFrame) -> pl.DataFrame:
     return result
 
 
+def regroup_urls(df: pl.DataFrame) -> pl.DataFrame:
+    """Regroup exploded URLs back into list per document.
+
+    Args:
+        df: DataFrame with doc_id, url, type columns (one row per URL).
+
+    Returns:
+        DataFrame with doc_id, urls columns (one row per document).
+    """
+    return df.group_by("doc_id").agg([
+        pl.struct(["url", "type"]).alias("urls")
+    ])
+
+
 def _extract_and_normalize_urls(text: str) -> List[Dict[str, str]]:
     """Extract and normalize URLs from text.
 
