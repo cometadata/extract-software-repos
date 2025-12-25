@@ -1,10 +1,13 @@
 """Polars-based URL extraction for high-performance processing."""
 
-from typing import List, Dict
+import json
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Union
 
 import polars as pl
 
 from .extraction import extract_urls_with_types
+from .processing import parse_arxiv_id, derive_doi
 
 # Domains that need spaced-character fixing
 SPACED_DOMAINS = [
@@ -95,3 +98,90 @@ def extract_urls_polars_df(
     ])
 
     return result
+
+
+def process_parquet_polars(
+    parquet_path: Union[str, Path],
+    output_path: Union[str, Path],
+    id_field: str = "relative_path",
+    content_field: str = "content",
+    chunk_size: int = 50000,
+    heal_markdown: bool = False,
+    progress_callback: Optional[Callable[[int, int, int], None]] = None,
+) -> dict:
+    """Process parquet file with Polars for high-performance extraction.
+
+    Args:
+        parquet_path: Path to input parquet file.
+        output_path: Path to output JSONL file.
+        id_field: Column containing document IDs.
+        content_field: Column containing text content.
+        chunk_size: Rows per processing chunk.
+        heal_markdown: Whether to heal markdown before extraction.
+        progress_callback: Optional callback(papers_processed, papers_with_urls, total_urls).
+
+    Returns:
+        Stats dict with total_papers, papers_with_urls, total_urls, urls_by_type.
+    """
+    parquet_path = Path(parquet_path)
+    output_path = Path(output_path)
+
+    stats = {
+        "total_papers": 0,
+        "papers_with_urls": 0,
+        "total_urls": 0,
+        "urls_by_type": {},
+        "healing_warnings": 0,
+    }
+
+    # Read full dataframe
+    df = pl.read_parquet(parquet_path)
+
+    # Apply healing if requested
+    if heal_markdown:
+        from .healing import heal_text
+        healed_content = []
+        for content in df[content_field].to_list():
+            if content:
+                healed, warnings = heal_text(content)
+                healed_content.append(healed)
+                if warnings:
+                    stats["healing_warnings"] += 1
+            else:
+                healed_content.append("")
+        df = df.with_columns(pl.Series(content_field, healed_content))
+
+    # Extract URLs
+    result = extract_urls_polars_df(df, id_col=id_field, content_col=content_field)
+
+    # Write results
+    with open(output_path, "w", encoding="utf-8") as f:
+        for row in result.iter_rows(named=True):
+            doc_id = row["id"]
+            urls = row["urls"]
+
+            stats["total_papers"] += 1
+
+            if urls:
+                # Parse arxiv ID and derive DOI
+                arxiv_id = parse_arxiv_id(doc_id) if doc_id else None
+
+                if arxiv_id:
+                    stats["papers_with_urls"] += 1
+                    stats["total_urls"] += len(urls)
+
+                    for url_info in urls:
+                        url_type = url_info["type"]
+                        stats["urls_by_type"][url_type] = stats["urls_by_type"].get(url_type, 0) + 1
+
+                    record = {
+                        "arxiv_id": arxiv_id,
+                        "doi": derive_doi(arxiv_id),
+                        "urls": urls,
+                    }
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+            if progress_callback:
+                progress_callback(stats["total_papers"], stats["papers_with_urls"], stats["total_urls"])
+
+    return stats

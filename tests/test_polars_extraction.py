@@ -1,5 +1,8 @@
 """Tests for Polars-based extraction."""
 
+import tempfile
+from pathlib import Path
+
 import pytest
 import polars as pl
 
@@ -85,3 +88,60 @@ class TestPolarsExtraction:
         # Should deduplicate to single repo
         github_urls = [u for u in urls if "github" in u["type"]]
         assert len(github_urls) == 1
+
+
+class TestPolarsParquetProcessing:
+    """Test Polars parquet processing."""
+
+    def test_processes_parquet_file(self):
+        from extract_software_repos.polars_extraction import process_parquet_polars
+
+        # Create test parquet
+        df = pl.DataFrame({
+            "relative_path": ["2308.11197v1.md", "2309.12345v2.md"],
+            "content": [
+                "Code at https://github.com/user/repo",
+                "Package: https://pypi.org/project/mylib"
+            ]
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = Path(tmpdir) / "test.parquet"
+            output_path = Path(tmpdir) / "output.jsonl"
+            df.write_parquet(input_path)
+
+            stats = process_parquet_polars(
+                input_path,
+                output_path,
+                id_field="relative_path",
+                content_field="content",
+            )
+
+            assert stats["total_papers"] == 2
+            assert stats["papers_with_urls"] == 2
+            assert output_path.exists()
+
+    def test_processes_with_progress(self):
+        from extract_software_repos.polars_extraction import process_parquet_polars
+
+        df = pl.DataFrame({
+            "relative_path": ["2308.11197v1.md"],
+            "content": ["https://github.com/user/repo"]
+        })
+
+        progress_calls = []
+        def callback(processed, with_urls, total):
+            progress_calls.append((processed, with_urls, total))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = Path(tmpdir) / "test.parquet"
+            output_path = Path(tmpdir) / "output.jsonl"
+            df.write_parquet(input_path)
+
+            process_parquet_polars(
+                input_path,
+                output_path,
+                progress_callback=callback,
+            )
+
+            assert len(progress_calls) >= 1
