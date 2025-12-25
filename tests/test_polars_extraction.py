@@ -163,3 +163,30 @@ class TestPolarsPatterns:
         match = re.search(pattern, "see https://github.com/user/repo for code")
         assert match is not None
         assert "github.com/user/repo" in match.group(0)
+
+
+class TestFilterPatterns:
+    """Test filter pattern constants."""
+
+    def test_excluded_paths_pattern_exists(self):
+        from extract_software_repos.polars_extraction import EXCLUDED_PATHS_PATTERN
+        assert isinstance(EXCLUDED_PATHS_PATTERN, str)
+
+    def test_excluded_paths_matches_wiki(self):
+        import re
+        from extract_software_repos.polars_extraction import EXCLUDED_PATHS_PATTERN
+        assert re.search(EXCLUDED_PATHS_PATTERN, "github.com/user/repo/wiki/Page")
+
+    def test_excluded_paths_matches_issues(self):
+        import re
+        from extract_software_repos.polars_extraction import EXCLUDED_PATHS_PATTERN
+        assert re.search(EXCLUDED_PATHS_PATTERN, "github.com/user/repo/issues/123")
+
+    def test_data_extensions_pattern_exists(self):
+        from extract_software_repos.polars_extraction import DATA_EXTENSIONS_PATTERN
+        assert isinstance(DATA_EXTENSIONS_PATTERN, str)
+
+    def test_data_extensions_matches_csv(self):
+        import re
+        from extract_software_repos.polars_extraction import DATA_EXTENSIONS_PATTERN
+        assert re.search(DATA_EXTENSIONS_PATTERN, "file.csv")

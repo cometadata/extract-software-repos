@@ -40,6 +40,13 @@ POLARS_URL_PATTERNS = {
     "codeocean": r"(?:https?://)?codeocean\.com/capsule/[a-zA-Z0-9_-]+",
 }
 
+# Filter patterns for exclusions
+EXCLUDED_PATHS_PATTERN = r"/(?:wiki|issues|pull|pulls|discussions|projects|actions|security|pulse|graphs|settings|stargazers|watchers|network|forks)(?:/|$)"
+
+DATA_EXTENSIONS_PATTERN = r"\.(?:csv|json|xml|xlsx|xls|tsv|dat|txt|md|rst|pdf|doc|docx|png|jpg|jpeg|gif|svg|bmp|zip|tar|gz|rar|7z)$"
+
+GITHUB_PAGES_PATTERN = r"[a-zA-Z0-9_-]+\.github\.io/"
+
 
 def preprocess_content(col: str) -> pl.Expr:
     """Create Polars expression for text preprocessing.
