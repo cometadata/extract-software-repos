@@ -82,7 +82,7 @@ extract-software-repos validate enrichments.jsonl -o validated.jsonl
 
 ## Output Format
 
-Both `extract-software` and `extract-urls` output enrichment records compatible with [datacite-enrichment](https://github.com/cometadata/datacite-enrichment):
+The `extract` command outputs enrichment records compatible with [datacite-enrichment](https://github.com/cometadata/datacite-enrichment):
 
 ```json
 {
