@@ -267,6 +267,76 @@ def regroup_urls(df: pl.DataFrame) -> pl.DataFrame:
     ])
 
 
+def extract_urls_polars_native(
+    df: pl.DataFrame,
+    id_col: str = "relative_path",
+    content_col: str = "content",
+) -> pl.DataFrame:
+    """Extract URLs using fully native Polars pipeline.
+
+    Complete pipeline: extract -> normalize -> filter -> deduplicate -> regroup.
+    All operations run in Rust with automatic parallelization.
+
+    Args:
+        df: Input DataFrame with id and content columns.
+        id_col: Column containing document IDs.
+        content_col: Column containing text content.
+
+    Returns:
+        DataFrame with id and urls columns (list of {url, type} structs).
+    """
+    # Step 1: Extract all URLs (returns exploded DataFrame)
+    extracted = extract_urls_native(df, id_col=id_col, content_col=content_col)
+
+    if len(extracted) == 0:
+        # No URLs found - return DataFrame with empty lists
+        return df.select([
+            pl.col(id_col).alias("id"),
+        ]).with_columns([
+            pl.lit([]).cast(pl.List(pl.Struct([
+                pl.Field("url", pl.Utf8),
+                pl.Field("type", pl.Utf8),
+            ]))).alias("urls")
+        ])
+
+    # Step 2: Normalize URLs
+    normalized = normalize_urls(extracted)
+
+    # Step 3: Filter exclusions
+    filtered = filter_urls(normalized)
+
+    if len(filtered) == 0:
+        # All URLs filtered out
+        return df.select([
+            pl.col(id_col).alias("id"),
+        ]).with_columns([
+            pl.lit([]).cast(pl.List(pl.Struct([
+                pl.Field("url", pl.Utf8),
+                pl.Field("type", pl.Utf8),
+            ]))).alias("urls")
+        ])
+
+    # Step 4: Deduplicate per document
+    deduped = deduplicate_urls(filtered)
+
+    # Step 5: Regroup into lists per document
+    regrouped = regroup_urls(deduped)
+
+    # Join back to original to preserve docs with no URLs
+    result = df.select([pl.col(id_col).alias("id")]).join(
+        regrouped.rename({"doc_id": "id"}),
+        on="id",
+        how="left"
+    )
+
+    # Fill nulls with empty list
+    result = result.with_columns([
+        pl.col("urls").fill_null([])
+    ])
+
+    return result
+
+
 def _extract_and_normalize_urls(text: str) -> List[Dict[str, str]]:
     """Extract and normalize URLs from text.
 

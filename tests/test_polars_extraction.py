@@ -455,3 +455,62 @@ class TestRegrouping:
         assert len(urls_list) == 1
         assert urls_list[0]["url"] == "https://github.com/user/repo"
         assert urls_list[0]["type"] == "github"
+
+
+class TestNativePipeline:
+    """Test complete native extraction pipeline."""
+
+    def test_extract_urls_polars_native_exists(self):
+        from extract_software_repos.polars_extraction import extract_urls_polars_native
+        assert callable(extract_urls_polars_native)
+
+    def test_pipeline_extracts_github(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import extract_urls_polars_native
+
+        df = pl.DataFrame({
+            "id": ["doc1"],
+            "content": ["Check https://github.com/user/repo for code"]
+        })
+        result = extract_urls_polars_native(df, id_col="id", content_col="content")
+        assert len(result) == 1
+        urls = result["urls"][0]
+        assert any("github.com/user/repo" in u["url"] for u in urls)
+
+    def test_pipeline_filters_exclusions(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import extract_urls_polars_native
+
+        df = pl.DataFrame({
+            "id": ["doc1"],
+            "content": ["https://github.com/user/repo and https://github.com/user/repo/wiki/Page"]
+        })
+        result = extract_urls_polars_native(df, id_col="id", content_col="content")
+        urls = result["urls"][0]
+        # Wiki should be filtered out
+        assert not any("wiki" in u["url"] for u in urls)
+
+    def test_pipeline_deduplicates(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import extract_urls_polars_native
+
+        df = pl.DataFrame({
+            "id": ["doc1"],
+            "content": ["https://github.com/user/repo and https://github.com/user/repo/releases"]
+        })
+        result = extract_urls_polars_native(df, id_col="id", content_col="content")
+        urls = result["urls"][0]
+        github_urls = [u for u in urls if u["type"] == "github"]
+        assert len(github_urls) == 1
+
+    def test_pipeline_handles_empty(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import extract_urls_polars_native
+
+        df = pl.DataFrame({
+            "id": ["doc1"],
+            "content": ["No URLs here at all"]
+        })
+        result = extract_urls_polars_native(df, id_col="id", content_col="content")
+        assert len(result) == 1
+        assert len(result["urls"][0]) == 0
