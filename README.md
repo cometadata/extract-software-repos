@@ -19,32 +19,28 @@ uv pip install -e .
 
 ## Usage
 
+### Extract from Full-Text (Parquet)
+
+Extract URLs from arXiv full-text papers in Parquet format (default):
+
+```bash
+extract-software-repos extract papers.parquet -o enrichments.jsonl
+```
+
+**Options:**
+- `-o, --output PATH` - Output file (default: `<input>_enrichments.jsonl`)
+- `-c, --chunk-size INT` - Rows per chunk (default: 50000)
+- `--id-field` - Column with arXiv ID (default: `relative_path`)
+- `--content-field` - Column with text (default: `content`)
+- `--heal-markdown` - Preprocess text through markdown healing before extraction
+
 ### Extract from DataCite Records
 
 Scan record abstracts for software URLs:
 
 ```bash
-extract-software-repos extract-software records.jsonl.gz -o enrichments.jsonl
+extract-software-repos extract records.jsonl.gz --from-datacite-abstract -o enrichments.jsonl
 ```
-
-**Options:**
-- `-o, --output PATH` - Output file (default: `software_enrichments.jsonl`)
-- `--log-level` - DEBUG, INFO, WARNING, ERROR
-
-### Extract from Full-Text (Parquet)
-
-Extract URLs from arXiv full-text papers in Parquet format:
-
-```bash
-extract-software-repos extract-urls arxiv.parquet -o urls.jsonl
-```
-
-**Options:**
-- `-o, --output PATH` - Output file (default: `<input>_urls.jsonl`)
-- `-c, --chunk-size INT` - Rows per chunk (default: 50000)
-- `--id-field` - Column with arXiv ID (default: `relative_path`)
-- `--content-field` - Column with text (default: `content`)
-- `--heal-markdown` - Preprocess text through markdown healing before extraction
 
 ### Heal Markdown Text
 
@@ -52,16 +48,17 @@ Clean malformed PDF-extracted text before or during extraction:
 
 ```bash
 # Heal during extraction
-extract-software-repos extract-urls arxiv.parquet -o urls.jsonl --heal-markdown
+extract-software-repos extract papers.parquet -o enrichments.jsonl --heal-markdown
 
 # Heal first, then extract
-extract-software-repos heal-text arxiv.parquet -o arxiv_healed.parquet
-extract-software-repos extract-urls arxiv_healed.parquet -o urls.jsonl
+extract-software-repos heal-text papers.parquet -o papers_healed.parquet
+extract-software-repos extract papers_healed.parquet -o enrichments.jsonl
 ```
 
 **heal-text Options:**
 - `-o, --output PATH` - Output file (default: `<input>_healed.parquet`)
 - `--content-field` - Column with text (auto-detected)
+- `-w, --workers INT` - Parallel workers (default: CPU count)
 - `-c, --chunk-size INT` - Rows per chunk (default: 1000)
 
 ### Validate URLs
@@ -109,13 +106,13 @@ One record is output per URL found.
 
 ```bash
 # 1. Extract URLs from full-text (with healing for better extraction)
-extract-software-repos extract-urls arxiv.parquet -o urls.jsonl --heal-markdown
+extract-software-repos extract papers.parquet -o enrichments.jsonl --heal-markdown
 
 # 2. Validate URLs exist
-extract-software-repos validate urls.jsonl -o urls_valid.jsonl
+extract-software-repos validate enrichments.jsonl -o enrichments_valid.jsonl
 
 # 3. Use with datacite-enrichment to merge into records
-datacite-enrich merge records.jsonl.gz enrichments.jsonl -o merged.jsonl
+datacite-enrich merge records.jsonl.gz enrichments_valid.jsonl -o merged.jsonl
 ```
 
 ## Development

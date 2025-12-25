@@ -37,76 +37,37 @@ def cli():
     pass
 
 
-@cli.command("extract-software")
-@click.argument("records_file", type=click.Path(exists=True, path_type=Path))
+@cli.command("extract")
+@click.argument("input_file", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--from-datacite-abstract",
+    "source_type",
+    flag_value="datacite",
+    help="Extract from DataCite record abstracts (JSONL input)"
+)
+@click.option(
+    "--from-parquet",
+    "source_type",
+    flag_value="parquet",
+    default=True,
+    help="Extract from parquet fulltext (default)"
+)
 @click.option(
     "--output", "-o",
     type=click.Path(path_type=Path),
-    default="software_enrichments.jsonl",
-    help="Output file path (default: software_enrichments.jsonl)"
-)
-@click.option(
-    "--log-level",
-    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
-    default="INFO",
-    help="Logging level"
-)
-def extract_software(records_file: Path, output: Path, log_level: str):
-    """Extract software URLs from record abstracts.
-
-    RECORDS_FILE: Path to records.jsonl or records.jsonl.gz file
-
-    Scans abstracts for software repository URLs (GitHub, PyPI, etc.)
-    and creates enrichment records.
-
-    Example:
-        extract-software-repos extract-software records.jsonl.gz -o enrichments.jsonl
-    """
-    from .processing import process_record
-
-    _setup_logging(log_level)
-
-    click.echo(f"Extracting software URLs from {records_file}")
-
-    total_records = 0
-    total_enrichments = 0
-
-    with open(output, "w", encoding="utf-8") as out_f:
-        for record in _stream_jsonl(records_file):
-            total_records += 1
-
-            enrichments = process_record(record)
-            for enrichment in enrichments:
-                out_f.write(json.dumps(enrichment, ensure_ascii=False) + "\n")
-                total_enrichments += 1
-
-            if total_records % 10000 == 0:
-                click.echo(f"  Processed {total_records:,} records, {total_enrichments:,} enrichments...")
-
-    click.echo(f"\nExtraction complete!")
-    click.echo(f"  Records processed: {total_records:,}")
-    click.echo(f"  Enrichments created: {total_enrichments:,}")
-    click.echo(f"  Output: {output}")
-
-
-@cli.command("extract-urls")
-@click.argument("parquet_file", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "--output", "-o",
-    type=click.Path(path_type=Path),
-    help="Output JSONL file (default: <input>_urls.jsonl)"
+    help="Output JSONL file (default: <input>_enrichments.jsonl)"
 )
 @click.option(
     "--chunk-size", "-c",
     type=int,
     default=50000,
-    help="Rows per processing chunk (default: 50000)"
+    help="Rows per chunk for parquet (default: 50000)"
 )
 @click.option(
     "--id-field",
     type=str,
     default="relative_path",
-    help="Column containing arxiv ID (default: relative_path)"
+    help="Column containing ID (default: relative_path)"
 )
 @click.option(
     "--content-field",
@@ -125,8 +86,9 @@ def extract_software(records_file: Path, output: Path, log_level: str):
     default="INFO",
     help="Logging level"
 )
-def extract_urls(
-    parquet_file: Path,
+def extract(
+    input_file: Path,
+    source_type: str,
     output: Optional[Path],
     chunk_size: int,
     id_field: str,
@@ -134,33 +96,73 @@ def extract_urls(
     heal_markdown: bool,
     log_level: str,
 ):
-    """Extract software URLs from full-text parquet file.
+    """Extract software repository URLs from text.
 
-    PARQUET_FILE: Path to parquet file with arxiv content.
+    INPUT_FILE: Path to input file (parquet or JSONL)
 
-    Uses Polars for high-performance parallel processing.
-
-    Example:
-        extract-software-repos extract-urls arxiv.parquet -o urls.jsonl
-        extract-software-repos extract-urls arxiv.parquet --heal-markdown
+    Examples:
+        extract-software-repos extract papers.parquet -o enrichments.jsonl
+        extract-software-repos extract records.jsonl.gz --from-datacite-abstract
     """
+    _setup_logging(log_level)
+
+    if output is None:
+        output = input_file.parent / f"{input_file.stem}_enrichments.jsonl"
+
+    if source_type == "datacite":
+        _extract_datacite(input_file, output)
+    else:
+        _extract_parquet(input_file, output, chunk_size, id_field, content_field, heal_markdown)
+
+
+def _extract_datacite(input_file: Path, output: Path):
+    """Extract from DataCite record abstracts."""
+    from .processing import process_record
+
+    click.echo(f"Extracting from DataCite abstracts: {input_file}")
+    click.echo(f"Output: {output}")
+
+    total_records = 0
+    total_enrichments = 0
+
+    with open(output, "w", encoding="utf-8") as out_f:
+        for record in _stream_jsonl(input_file):
+            total_records += 1
+
+            enrichments = process_record(record)
+            for enrichment in enrichments:
+                out_f.write(json.dumps(enrichment, ensure_ascii=False) + "\n")
+                total_enrichments += 1
+
+            if total_records % 10000 == 0:
+                click.echo(f"  Processed {total_records:,} records, {total_enrichments:,} enrichments...")
+
+    click.echo(f"\nExtraction complete!")
+    click.echo(f"  Records processed: {total_records:,}")
+    click.echo(f"  Enrichments created: {total_enrichments:,}")
+    click.echo(f"  Output: {output}")
+
+
+def _extract_parquet(
+    input_file: Path,
+    output: Path,
+    chunk_size: int,
+    id_field: str,
+    content_field: str,
+    heal_markdown: bool,
+):
+    """Extract from parquet fulltext."""
     import polars as pl
     from tqdm import tqdm
     from .polars_extraction import process_parquet_polars
 
-    _setup_logging(log_level)
-
-    if output is None:
-        output = parquet_file.parent / f"{parquet_file.stem}_urls.jsonl"
-
     heal_status = " (with markdown healing)" if heal_markdown else ""
-    click.echo(f"Extracting URLs from {parquet_file}{heal_status}")
+    click.echo(f"Extracting from parquet: {input_file}{heal_status}")
     click.echo(f"Output: {output}")
 
-    # Get total rows for progress bar
-    total_rows = pl.scan_parquet(parquet_file).select(pl.len()).collect().item()
+    total_rows = pl.scan_parquet(input_file).select(pl.len()).collect().item()
 
-    pbar = tqdm(total=total_rows, desc="Processing papers", unit="papers")
+    pbar = tqdm(total=total_rows, desc="Processing", unit="docs")
     last_processed = 0
 
     def progress_callback(papers_processed, papers_with_urls, total_urls):
@@ -170,7 +172,7 @@ def extract_urls(
         pbar.set_postfix({"with_urls": papers_with_urls, "urls": total_urls})
 
     stats = process_parquet_polars(
-        parquet_file,
+        input_file,
         output,
         id_field=id_field,
         content_field=content_field,
@@ -182,15 +184,15 @@ def extract_urls(
     pbar.close()
 
     click.echo(f"\nExtraction complete!")
-    click.echo(f"  Total papers: {stats['total_papers']:,}")
-    click.echo(f"  Papers with URLs: {stats['papers_with_urls']:,}")
-    click.echo(f"  Total URLs: {stats['total_urls']:,}")
+    click.echo(f"  Total documents: {stats['total_papers']:,}")
+    click.echo(f"  With URLs: {stats['papers_with_urls']:,}")
+    click.echo(f"  Total enrichments: {stats['total_urls']:,}")
 
     if heal_markdown and stats.get("healing_warnings", 0) > 0:
         click.echo(f"  Healing warnings: {stats['healing_warnings']:,} documents")
 
     if stats["urls_by_type"]:
-        click.echo(f"  URLs by type:")
+        click.echo(f"  By type:")
         for url_type, count in sorted(stats["urls_by_type"].items(), key=lambda x: -x[1]):
             click.echo(f"    {url_type}: {count:,}")
 
@@ -256,7 +258,6 @@ def validate(
     click.echo(f"Validating URLs from {input_file}")
     click.echo(f"Workers: {workers}, Timeout: {timeout}s")
 
-    # Load enrichments
     enrichments = []
     for line in open(input_file, "r", encoding="utf-8"):
         line = line.strip()
@@ -268,7 +269,6 @@ def validate(
     stats = ValidationStats()
     valid_enrichments = []
 
-    # Determine URL type from enrichment
     def get_url_type(enrichment: dict) -> str:
         url = enrichment.get("enrichedValue", {}).get("relatedIdentifier", "")
         url_lower = url.lower()
@@ -304,7 +304,6 @@ def validate(
             }
             valid_enrichments.append(enrichment)
 
-    # Write output
     with open(output, "w", encoding="utf-8") as f:
         for enrichment in valid_enrichments:
             f.write(json.dumps(enrichment, ensure_ascii=False) + "\n")
@@ -374,7 +373,6 @@ def heal_text_cmd(
     click.echo(f"Healing text in {parquet_file}")
     click.echo(f"Output: {output}")
 
-    # Auto-detect content field if not specified
     if content_field is None:
         df_schema = pl.read_parquet_schema(parquet_file)
         content_candidates = ['content', 'text', 'markdown', 'md', 'body']
@@ -390,7 +388,6 @@ def heal_text_cmd(
 
     click.echo(f"Using content column: {content_field}")
 
-    # Get row count
     total_rows = pl.scan_parquet(parquet_file).select(pl.len()).collect().item()
     click.echo(f"Processing {total_rows:,} documents...")
 

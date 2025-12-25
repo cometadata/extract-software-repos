@@ -17,20 +17,19 @@ def runner():
     return CliRunner()
 
 
-class TestExtractSoftwareCommand:
-    """Test extract-software command."""
+class TestExtractCommand:
+    """Test extract command."""
 
     def test_help(self, runner):
-        result = runner.invoke(cli, ["extract-software", "--help"])
+        result = runner.invoke(cli, ["extract", "--help"])
         assert result.exit_code == 0
-        assert "Extract software URLs from record abstracts" in result.output
+        assert "Extract software repository URLs" in result.output
 
-    def test_extracts_from_jsonl(self, runner):
+    def test_extracts_from_datacite(self, runner):
         with tempfile.TemporaryDirectory() as tmpdir:
             input_file = Path(tmpdir) / "records.jsonl"
             output_file = Path(tmpdir) / "enrichments.jsonl"
 
-            # Create test input
             records = [
                 {
                     "id": "10.1234/test1",
@@ -46,8 +45,9 @@ class TestExtractSoftwareCommand:
                     f.write(json.dumps(record) + "\n")
 
             result = runner.invoke(cli, [
-                "extract-software",
+                "extract",
                 str(input_file),
+                "--from-datacite-abstract",
                 "-o", str(output_file)
             ])
 
@@ -60,20 +60,7 @@ class TestExtractSoftwareCommand:
             assert len(enrichments) == 1
             assert enrichments[0]["doi"] == "10.1234/test1"
 
-
-class TestValidateCommand:
-    """Test validate command."""
-
-    def test_help(self, runner):
-        result = runner.invoke(cli, ["validate", "--help"])
-        assert result.exit_code == 0
-        assert "Validate extracted URLs" in result.output
-
-
-class TestUpdatedCLI:
-    """Test updated CLI with Polars backend."""
-
-    def test_extract_urls_uses_polars(self, runner):
+    def test_extracts_from_parquet(self, runner):
         df = pl.DataFrame({
             "relative_path": ["2308.11197v1.md"],
             "content": ["Check https://github.com/user/repo"]
@@ -85,13 +72,26 @@ class TestUpdatedCLI:
             df.write_parquet(input_path)
 
             result = runner.invoke(cli, [
-                "extract-urls",
+                "extract",
                 str(input_path),
                 "-o", str(output_path),
             ])
 
             assert result.exit_code == 0
             assert output_path.exists()
+
+
+class TestValidateCommand:
+    """Test validate command."""
+
+    def test_help(self, runner):
+        result = runner.invoke(cli, ["validate", "--help"])
+        assert result.exit_code == 0
+        assert "Validate extracted URLs" in result.output
+
+
+class TestHealTextCommand:
+    """Test heal-text command."""
 
     def test_heal_text_parallel(self, runner):
         df = pl.DataFrame({
