@@ -115,6 +115,11 @@ def extract_software(records_file: Path, output: Path, log_level: str):
     help="Column containing text (default: content)"
 )
 @click.option(
+    "--heal-markdown",
+    is_flag=True,
+    help="Preprocess text through markdown healing before extraction"
+)
+@click.option(
     "--log-level",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
     default="INFO",
@@ -126,6 +131,7 @@ def extract_urls(
     batch_size: int,
     id_field: str,
     content_field: str,
+    heal_markdown: bool,
     log_level: str,
 ):
     """Extract software URLs from full-text parquet file.
@@ -136,6 +142,7 @@ def extract_urls(
 
     Example:
         extract-software-repos extract-urls arxiv.parquet -o urls.jsonl
+        extract-software-repos extract-urls arxiv.parquet --heal-markdown
     """
     import pyarrow.parquet as pq
     from tqdm import tqdm
@@ -146,7 +153,8 @@ def extract_urls(
     if output is None:
         output = parquet_file.parent / f"{parquet_file.stem}_urls.jsonl"
 
-    click.echo(f"Extracting URLs from {parquet_file}")
+    heal_status = " (with markdown healing)" if heal_markdown else ""
+    click.echo(f"Extracting URLs from {parquet_file}{heal_status}")
     click.echo(f"Output: {output}")
 
     pf = pq.ParquetFile(parquet_file)
@@ -167,6 +175,7 @@ def extract_urls(
         batch_size=batch_size,
         id_field=id_field,
         content_field=content_field,
+        heal_markdown=heal_markdown,
     )
 
     pbar.close()
@@ -179,6 +188,9 @@ def extract_urls(
     click.echo(f"  Total papers: {stats['total_papers']:,}")
     click.echo(f"  Papers with URLs: {stats['papers_with_urls']:,}")
     click.echo(f"  Total URLs: {stats['total_urls']:,}")
+
+    if heal_markdown and stats.get("healing_warnings", 0) > 0:
+        click.echo(f"  Healing warnings: {stats['healing_warnings']:,} documents")
 
     if stats["urls_by_type"]:
         click.echo(f"  URLs by type:")
@@ -303,6 +315,103 @@ def validate(
     click.echo(f"\nValidation complete!")
     click.echo(stats.summary())
     click.echo(f"Output: {output} ({len(valid_enrichments):,} enrichments)")
+
+
+@cli.command("heal-text")
+@click.argument("parquet_file", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--output", "-o",
+    type=click.Path(path_type=Path),
+    help="Output parquet file (default: <input>_healed.parquet)"
+)
+@click.option(
+    "--content-field",
+    type=str,
+    default=None,
+    help="Column containing text (auto-detected if not specified)"
+)
+@click.option(
+    "--batch-size", "-b",
+    type=int,
+    default=1000,
+    help="Rows per batch (default: 1000)"
+)
+@click.option(
+    "--log-level",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
+    default="INFO",
+    help="Logging level"
+)
+def heal_text_cmd(
+    parquet_file: Path,
+    output: Optional[Path],
+    content_field: Optional[str],
+    batch_size: int,
+    log_level: str,
+):
+    """Heal malformed markdown in parquet file.
+
+    PARQUET_FILE: Path to parquet file with text content.
+
+    Cleans PDF-extracted text: fixes hyphenation, merges broken lines,
+    removes repeated headers/footers, normalizes formatting.
+
+    Example:
+        extract-software-repos heal-text arxiv.parquet -o cleaned.parquet
+    """
+    import pandas as pd
+    from tqdm import tqdm
+    from .healing import heal_text
+
+    _setup_logging(log_level)
+
+    if output is None:
+        output = parquet_file.parent / f"{parquet_file.stem}_healed.parquet"
+
+    click.echo(f"Healing text in {parquet_file}")
+    click.echo(f"Output: {output}")
+
+    df = pd.read_parquet(parquet_file)
+
+    if content_field is None:
+        content_candidates = ['content', 'text', 'markdown', 'md', 'body']
+        for candidate in content_candidates:
+            if candidate in df.columns:
+                content_field = candidate
+                break
+
+    if content_field is None or content_field not in df.columns:
+        click.echo(f"Error: Could not detect content column. Available: {list(df.columns)}")
+        raise SystemExit(1)
+
+    click.echo(f"Using content column: {content_field}")
+    click.echo(f"Processing {len(df):,} documents...")
+
+    healed_content = []
+    heal_warnings = []
+    warning_count = 0
+
+    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Healing"):
+        content = row[content_field] or ""
+        healed, warnings = heal_text(content)
+
+        healed_content.append(healed)
+        heal_warnings.append("; ".join(warnings) if warnings else "")
+
+        if warnings:
+            warning_count += 1
+
+    df[content_field] = healed_content
+    df["_heal_warnings"] = heal_warnings
+    df.to_parquet(output, index=False)
+
+    successful = len(df) - warning_count
+
+    click.echo(f"\nHealing complete!")
+    click.echo(f"  Total documents:     {len(df):,}")
+    click.echo(f"  Successfully healed: {successful:,}")
+    click.echo(f"  With warnings:       {warning_count:,}")
+    click.echo(f"  Output: {output}")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,10 @@ dependencies = [
     "requests>=2.28",
     "pyarrow>=22.0.0",
     "tqdm>=4.67.1",
+    "ftfy>=6.0",
+    "mdformat>=0.7",
+    "markdown-it-py>=3.0",
+    "pandas>=2.0",
 ]
 
 [project.optional-dependencies]

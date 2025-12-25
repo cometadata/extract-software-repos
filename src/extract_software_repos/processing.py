@@ -146,32 +146,44 @@ def derive_doi(arxiv_id: str) -> str:
     return f"10.48550/arxiv.{arxiv_id}"
 
 
-def process_paper(filename: str, content: str) -> Optional[Dict]:
+def process_paper(
+    filename: str,
+    content: str,
+    heal_markdown: bool = False,
+) -> Tuple[Optional[Dict], List[str]]:
     """Process a single paper and extract URLs.
 
     Args:
         filename: Paper filename (e.g., "2308.11197v3.md")
         content: Full text content of the paper.
+        heal_markdown: Whether to heal markdown before extraction.
 
     Returns:
-        Dict with arxiv_id, doi, and urls list, or None if no URLs found.
+        Tuple of (result dict or None, list of healing warnings).
     """
+    healing_warnings: List[str] = []
+
     if not content:
-        return None
+        return None, healing_warnings
 
     arxiv_id = parse_arxiv_id(filename)
     if not arxiv_id:
-        return None
+        return None, healing_warnings
+
+    # Apply healing if requested
+    if heal_markdown:
+        from .healing import heal_text
+        content, healing_warnings = heal_text(content)
 
     urls = extract_urls_with_types(content)
     if not urls:
-        return None
+        return None, healing_warnings
 
     return {
         "arxiv_id": arxiv_id,
         "doi": derive_doi(arxiv_id),
         "urls": urls,
-    }
+    }, healing_warnings
 
 
 def process_parquet(
@@ -179,6 +191,7 @@ def process_parquet(
     batch_size: int = 1000,
     id_field: str = "relative_path",
     content_field: str = "content",
+    heal_markdown: bool = False,
 ) -> Iterator[Dict]:
     """Stream process a parquet file, yielding papers with URLs.
 
@@ -187,6 +200,7 @@ def process_parquet(
         batch_size: Number of rows per batch.
         id_field: Column containing arxiv ID/filename.
         content_field: Column containing text content.
+        heal_markdown: Whether to heal markdown before extraction.
 
     Yields:
         Dicts with arxiv_id, doi, and urls for papers with URLs.
@@ -201,7 +215,7 @@ def process_parquet(
         contents = batch_dict[content_field]
 
         for filename, content in zip(filenames, contents):
-            result = process_paper(filename, content or "")
+            result, _ = process_paper(filename, content or "", heal_markdown=heal_markdown)
             if result:
                 yield result
 
@@ -212,6 +226,7 @@ def process_parquet_with_progress(
     batch_size: int = 1000,
     id_field: str = "relative_path",
     content_field: str = "content",
+    heal_markdown: bool = False,
 ) -> Tuple[List[Dict], Dict]:
     """Process parquet file with progress callback.
 
@@ -221,6 +236,7 @@ def process_parquet_with_progress(
         batch_size: Number of rows per batch.
         id_field: Column containing arxiv ID/filename.
         content_field: Column containing text content.
+        heal_markdown: Whether to heal markdown before extraction.
 
     Returns:
         Tuple of (results list, stats dict).
@@ -232,6 +248,7 @@ def process_parquet_with_progress(
         "papers_with_urls": 0,
         "total_urls": 0,
         "urls_by_type": {},
+        "healing_warnings": 0,
     }
     results = []
 
@@ -244,7 +261,17 @@ def process_parquet_with_progress(
 
         for filename, content in zip(filenames, contents):
             stats["total_papers"] += 1
-            result = process_paper(filename, content or "")
+            result, healing_warnings = process_paper(
+                filename,
+                content or "",
+                heal_markdown=heal_markdown,
+            )
+
+            if healing_warnings:
+                stats["healing_warnings"] += 1
+                for warning in healing_warnings:
+                    logger.debug(f"{filename}: {warning}")
+
             if result:
                 stats["papers_with_urls"] += 1
                 stats["total_urls"] += len(result["urls"])

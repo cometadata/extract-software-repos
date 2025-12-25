@@ -44,6 +44,25 @@ extract-software-repos extract-urls arxiv.parquet -o urls.jsonl
 - `-b, --batch-size INT` - Rows per batch (default: 1000)
 - `--id-field` - Column with arXiv ID (default: `relative_path`)
 - `--content-field` - Column with text (default: `content`)
+- `--heal-markdown` - Preprocess text through markdown healing before extraction
+
+### Heal Markdown Text
+
+Clean malformed PDF-extracted text before or during extraction:
+
+```bash
+# Heal during extraction
+extract-software-repos extract-urls arxiv.parquet -o urls.jsonl --heal-markdown
+
+# Heal first, then extract
+extract-software-repos heal-text arxiv.parquet -o arxiv_healed.parquet
+extract-software-repos extract-urls arxiv_healed.parquet -o urls.jsonl
+```
+
+**heal-text Options:**
+- `-o, --output PATH` - Output file (default: `<input>_healed.parquet`)
+- `--content-field` - Column with text (auto-detected)
+- `-b, --batch-size INT` - Rows per batch (default: 1000)
 
 ### Validate URLs
 
@@ -100,8 +119,8 @@ extract-software-repos validate enrichments.jsonl -o validated.jsonl
 ## Pipeline Example
 
 ```bash
-# 1. Extract URLs from full-text
-extract-software-repos extract-urls arxiv.parquet -o urls.jsonl
+# 1. Extract URLs from full-text (with healing for better extraction)
+extract-software-repos extract-urls arxiv.parquet -o urls.jsonl --heal-markdown
 
 # 2. Validate URLs exist
 extract-software-repos validate urls.jsonl -o urls_valid.jsonl
