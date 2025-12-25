@@ -41,7 +41,7 @@ extract-software-repos extract-urls arxiv.parquet -o urls.jsonl
 
 **Options:**
 - `-o, --output PATH` - Output file (default: `<input>_urls.jsonl`)
-- `-b, --batch-size INT` - Rows per batch (default: 1000)
+- `-c, --chunk-size INT` - Rows per chunk (default: 50000)
 - `--id-field` - Column with arXiv ID (default: `relative_path`)
 - `--content-field` - Column with text (default: `content`)
 - `--heal-markdown` - Preprocess text through markdown healing before extraction
@@ -62,7 +62,7 @@ extract-software-repos extract-urls arxiv_healed.parquet -o urls.jsonl
 **heal-text Options:**
 - `-o, --output PATH` - Output file (default: `<input>_healed.parquet`)
 - `--content-field` - Column with text (auto-detected)
-- `-b, --batch-size INT` - Rows per batch (default: 1000)
+- `-c, --chunk-size INT` - Rows per chunk (default: 1000)
 
 ### Validate URLs
 
