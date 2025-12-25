@@ -76,7 +76,7 @@ def cli():
     help="Column containing text (default: content)"
 )
 @click.option(
-    "--heal-markdown",
+    "--heal-fulltext",
     is_flag=True,
     help="Preprocess text through markdown healing before extraction"
 )
@@ -93,7 +93,7 @@ def extract(
     chunk_size: int,
     id_field: str,
     content_field: str,
-    heal_markdown: bool,
+    heal_fulltext: bool,
     log_level: str,
 ):
     """Extract software repository URLs from text.
@@ -112,7 +112,7 @@ def extract(
     if source_type == "datacite":
         _extract_datacite(input_file, output)
     else:
-        _extract_parquet(input_file, output, chunk_size, id_field, content_field, heal_markdown)
+        _extract_parquet(input_file, output, chunk_size, id_field, content_field, heal_fulltext)
 
 
 def _extract_datacite(input_file: Path, output: Path):
@@ -149,14 +149,14 @@ def _extract_parquet(
     chunk_size: int,
     id_field: str,
     content_field: str,
-    heal_markdown: bool,
+    heal_fulltext: bool,
 ):
     """Extract from parquet fulltext."""
     import polars as pl
     from tqdm import tqdm
     from .polars_extraction import process_parquet_polars
 
-    heal_status = " (with markdown healing)" if heal_markdown else ""
+    heal_status = " (with fulltext healing)" if heal_fulltext else ""
     click.echo(f"Extracting from parquet: {input_file}{heal_status}")
     click.echo(f"Output: {output}")
 
@@ -177,7 +177,7 @@ def _extract_parquet(
         id_field=id_field,
         content_field=content_field,
         chunk_size=chunk_size,
-        heal_markdown=heal_markdown,
+        heal_fulltext=heal_fulltext,
         progress_callback=progress_callback,
     )
 
@@ -188,7 +188,7 @@ def _extract_parquet(
     click.echo(f"  With URLs: {stats['papers_with_urls']:,}")
     click.echo(f"  Total enrichments: {stats['total_urls']:,}")
 
-    if heal_markdown and stats.get("healing_warnings", 0) > 0:
+    if heal_fulltext and stats.get("healing_warnings", 0) > 0:
         click.echo(f"  Healing warnings: {stats['healing_warnings']:,} documents")
 
     if stats["urls_by_type"]:
@@ -313,7 +313,7 @@ def validate(
     click.echo(f"Output: {output} ({len(valid_enrichments):,} enrichments)")
 
 
-@cli.command("heal-text")
+@cli.command("heal-fulltext")
 @click.argument("parquet_file", type=click.Path(exists=True, path_type=Path))
 @click.option(
     "--output", "-o",

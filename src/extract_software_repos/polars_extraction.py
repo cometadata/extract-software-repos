@@ -221,7 +221,7 @@ def process_parquet_polars(
     id_field: str = "relative_path",
     content_field: str = "content",
     chunk_size: int = 50000,
-    heal_markdown: bool = False,
+    heal_fulltext: bool = False,
     progress_callback: Optional[Callable[[int, int, int], None]] = None,
 ) -> dict:
     """Process parquet file with Polars in chunks for memory efficiency."""
@@ -242,7 +242,7 @@ def process_parquet_polars(
         for offset in range(0, total_rows, chunk_size):
             chunk = pl.scan_parquet(parquet_path).slice(offset, chunk_size).collect()
 
-            if heal_markdown:
+            if heal_fulltext:
                 from .healing import heal_text
                 healed_content = []
                 for content in chunk[content_field].to_list():

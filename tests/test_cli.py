@@ -90,10 +90,10 @@ class TestValidateCommand:
         assert "Validate extracted URLs" in result.output
 
 
-class TestHealTextCommand:
-    """Test heal-text command."""
+class TestHealFulltextCommand:
+    """Test heal-fulltext command."""
 
-    def test_heal_text_parallel(self, runner):
+    def test_heal_fulltext_parallel(self, runner):
         df = pl.DataFrame({
             "content": ["Some text with git-\nhub.com link"]
         })
@@ -104,7 +104,7 @@ class TestHealTextCommand:
             df.write_parquet(input_path)
 
             result = runner.invoke(cli, [
-                "heal-text",
+                "heal-fulltext",
                 str(input_path),
                 "-o", str(output_path),
                 "--workers", "2",
