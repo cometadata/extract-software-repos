@@ -1,6 +1,10 @@
 """Polars-based URL extraction for high-performance processing."""
 
+from typing import List, Dict
+
 import polars as pl
+
+from .extraction import extract_urls_with_types
 
 # Domains that need spaced-character fixing
 SPACED_DOMAINS = [
@@ -43,3 +47,51 @@ def preprocess_content(col: str) -> pl.Expr:
         expr = expr.str.replace_all(pattern, domain)
 
     return expr.alias(col)
+
+
+def _extract_and_normalize_urls(text: str) -> List[Dict[str, str]]:
+    """Extract and normalize URLs from text.
+
+    Args:
+        text: Text to search for URLs.
+
+    Returns:
+        List of dicts with 'url' and 'type' keys.
+    """
+    if not text:
+        return []
+
+    # Reuse existing extraction logic which handles all normalization and deduplication
+    return extract_urls_with_types(text)
+
+
+def extract_urls_polars_df(
+    df: pl.DataFrame,
+    id_col: str = "relative_path",
+    content_col: str = "content",
+) -> pl.DataFrame:
+    """Extract URLs from a Polars DataFrame.
+
+    Args:
+        df: Input DataFrame with id and content columns.
+        id_col: Column containing document IDs.
+        content_col: Column containing text content.
+
+    Returns:
+        DataFrame with id and urls columns.
+    """
+    # Apply preprocessing
+    df = df.with_columns(preprocess_content(content_col))
+
+    # Extract URLs using map_elements (applies Python function row-wise)
+    result = df.select([
+        pl.col(id_col).alias("id"),
+        pl.col(content_col)
+          .map_elements(_extract_and_normalize_urls, return_dtype=pl.List(pl.Struct([
+              pl.Field("url", pl.Utf8),
+              pl.Field("type", pl.Utf8),
+          ])))
+          .alias("urls")
+    ])
+
+    return result
