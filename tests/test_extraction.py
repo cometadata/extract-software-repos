@@ -1,5 +1,4 @@
-# tests/test_extraction.py
-"""Tests for URL extraction."""
+"""Tests for DataCite URL extraction."""
 
 import pytest
 
@@ -116,32 +115,3 @@ class TestIsDuplicate:
             {"relatedIdentifier": "https://github.com/user/repo", "relatedIdentifierType": "URL"}
         ]
         assert is_duplicate("https://github.com/other/project", existing) is False
-
-
-class TestCombinedPattern:
-    """Test combined regex pattern for Polars extraction."""
-
-    def test_combined_pattern_matches_github(self):
-        from extract_software_repos.extraction import COMBINED_URL_PATTERN
-        import re
-        text = "Check https://github.com/user/repo for code"
-        matches = re.findall(COMBINED_URL_PATTERN, text, re.IGNORECASE | re.VERBOSE)
-        assert len(matches) >= 1
-
-    def test_combined_pattern_matches_pypi(self):
-        from extract_software_repos.extraction import COMBINED_URL_PATTERN
-        import re
-        text = "Install from https://pypi.org/project/mypackage"
-        matches = re.findall(COMBINED_URL_PATTERN, text, re.IGNORECASE | re.VERBOSE)
-        assert len(matches) >= 1
-
-    def test_combined_pattern_matches_multiple(self):
-        from extract_software_repos.extraction import COMBINED_URL_PATTERN
-        import re
-        text = """
-        GitHub: https://github.com/org/repo
-        PyPI: https://pypi.org/project/pkg
-        GitLab: https://gitlab.com/team/project
-        """
-        matches = re.findall(COMBINED_URL_PATTERN, text, re.IGNORECASE | re.VERBOSE)
-        assert len(matches) >= 3

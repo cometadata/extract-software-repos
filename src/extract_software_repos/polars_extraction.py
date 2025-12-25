@@ -171,7 +171,7 @@ def extract_urls_polars_native(
 ) -> pl.DataFrame:
     """Extract URLs using fully native Polars pipeline.
 
-    Pipeline: extract -> normalize -> filter -> deduplicate -> regroup.
+    Pipeline: extract -> filter -> normalize -> deduplicate -> regroup.
     All operations run in Rust with automatic parallelization.
     """
     extracted = extract_urls_native(df, id_col=id_col, content_col=content_col)
@@ -188,13 +188,13 @@ def extract_urls_polars_native(
     if len(extracted) == 0:
         return empty_result
 
-    normalized = normalize_urls(extracted)
-    filtered = filter_urls(normalized)
+    filtered = filter_urls(extracted)
 
     if len(filtered) == 0:
         return empty_result
 
-    deduped = deduplicate_urls(filtered)
+    normalized = normalize_urls(filtered)
+    deduped = deduplicate_urls(normalized)
     regrouped = regroup_urls(deduped)
 
     # Join back to preserve docs with no URLs

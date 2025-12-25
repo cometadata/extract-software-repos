@@ -4,11 +4,9 @@ __version__ = "0.1.0"
 
 from .extraction import (
     extract_software_urls,
-    extract_urls_with_types,
     preprocess_text,
     extract_base_repo,
     is_duplicate,
-    COMBINED_URL_PATTERN,
 )
 
 from .polars_extraction import (
@@ -37,13 +35,11 @@ from .validation import (
 )
 
 __all__ = [
-    # Original extraction
+    # DataCite extraction
     "extract_software_urls",
-    "extract_urls_with_types",
     "preprocess_text",
     "extract_base_repo",
     "is_duplicate",
-    "COMBINED_URL_PATTERN",
     # Polars extraction
     "preprocess_content",
     "extract_urls_polars_df",
