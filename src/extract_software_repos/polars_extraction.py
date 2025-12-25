@@ -135,6 +135,67 @@ def extract_urls_native(
     return result
 
 
+def normalize_urls(df: pl.DataFrame) -> pl.DataFrame:
+    """Normalize extracted URLs.
+
+    - Add https:// prefix if missing
+    - Strip www.
+    - Extract user/repo for code hosting platforms
+    - Strip .git suffix
+    - Strip trailing punctuation
+
+    Args:
+        df: DataFrame with doc_id, url, type columns.
+
+    Returns:
+        DataFrame with normalized URLs.
+    """
+    # Code hosting platforms that need user/repo extraction
+    code_hosts = ["github", "gitlab", "bitbucket", "codeberg"]
+
+    result = df.with_columns([
+        # First, clean up the URL
+        pl.col("url")
+            # Remove protocol and www for processing
+            .str.replace(r"^https?://", "")
+            .str.replace(r"^www\.", "")
+            # Strip trailing punctuation
+            .str.replace(r"[).,;:!?\"'>\]]+$", "")
+            .alias("clean_url")
+    ])
+
+    # For code hosts, extract just user/repo
+    result = result.with_columns([
+        pl.when(pl.col("type").is_in(code_hosts))
+        .then(
+            # Extract domain/user/repo only
+            pl.col("clean_url").str.extract(r"^([^/]+/[^/]+/[^/]+)")
+        )
+        .otherwise(pl.col("clean_url"))
+        .alias("clean_url")
+    ])
+
+    # Strip .git suffix
+    result = result.with_columns([
+        pl.col("clean_url")
+            .str.replace(r"\.git$", "")
+            # Strip any remaining trailing punctuation
+            .str.replace(r"[).,;:!?\"'>\]]+$", "")
+            .alias("clean_url")
+    ])
+
+    # Add https:// prefix back
+    result = result.with_columns([
+        pl.concat_str([pl.lit("https://"), pl.col("clean_url")])
+            .alias("url")
+    ])
+
+    # Drop temporary column
+    result = result.drop("clean_url")
+
+    return result
+
+
 def _extract_and_normalize_urls(text: str) -> List[Dict[str, str]]:
     """Extract and normalize URLs from text.
 

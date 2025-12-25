@@ -234,3 +234,59 @@ class TestNativeExtraction:
         result = extract_urls_native(df, id_col="id", content_col="content")
         assert len(result) >= 1
         assert any("github.com/user/repo" in url for url in result["url"].to_list())
+
+
+class TestNormalization:
+    """Test URL normalization."""
+
+    def test_normalize_urls_exists(self):
+        from extract_software_repos.polars_extraction import normalize_urls
+        assert callable(normalize_urls)
+
+    def test_normalize_adds_https(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import normalize_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1"],
+            "url": ["github.com/user/repo"],
+            "type": ["github"],
+        })
+        result = normalize_urls(df)
+        assert result["url"][0].startswith("https://")
+
+    def test_normalize_strips_git_suffix(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import normalize_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1"],
+            "url": ["https://github.com/user/repo.git"],
+            "type": ["github"],
+        })
+        result = normalize_urls(df)
+        assert not result["url"][0].endswith(".git")
+
+    def test_normalize_extracts_user_repo(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import normalize_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1"],
+            "url": ["https://github.com/user/repo/blob/main/file.py"],
+            "type": ["github"],
+        })
+        result = normalize_urls(df)
+        assert result["url"][0] == "https://github.com/user/repo"
+
+    def test_normalize_strips_trailing_punctuation(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import normalize_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1"],
+            "url": ["https://github.com/user/repo)."],
+            "type": ["github"],
+        })
+        result = normalize_urls(df)
+        assert not result["url"][0].endswith(").")
