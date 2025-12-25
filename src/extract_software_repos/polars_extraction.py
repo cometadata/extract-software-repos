@@ -360,6 +360,8 @@ def extract_urls_polars_df(
 ) -> pl.DataFrame:
     """Extract URLs from a Polars DataFrame.
 
+    Uses fully native Polars pipeline for maximum performance.
+
     Args:
         df: Input DataFrame with id and content columns.
         id_col: Column containing document IDs.
@@ -368,21 +370,7 @@ def extract_urls_polars_df(
     Returns:
         DataFrame with id and urls columns.
     """
-    # Apply preprocessing
-    df = df.with_columns(preprocess_content(content_col))
-
-    # Extract URLs using map_elements (applies Python function row-wise)
-    result = df.select([
-        pl.col(id_col).alias("id"),
-        pl.col(content_col)
-          .map_elements(_extract_and_normalize_urls, return_dtype=pl.List(pl.Struct([
-              pl.Field("url", pl.Utf8),
-              pl.Field("type", pl.Utf8),
-          ])))
-          .alias("urls")
-    ])
-
-    return result
+    return extract_urls_polars_native(df, id_col=id_col, content_col=content_col)
 
 
 def process_parquet_polars(

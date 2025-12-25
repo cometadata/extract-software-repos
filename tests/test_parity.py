@@ -86,3 +86,33 @@ class TestExtractionParity:
         polars_has_github = any("github" in u["url"] for u in polars_urls)
 
         assert original_has_github == polars_has_github
+
+
+class TestNativeParity:
+    """Verify native Polars extraction produces similar results."""
+
+    def test_native_finds_github_urls(self):
+        """Native extraction finds GitHub URLs."""
+        import polars as pl
+        from extract_software_repos.polars_extraction import extract_urls_polars_df
+
+        df = pl.DataFrame({
+            "id": ["doc1"],
+            "content": ["Check https://github.com/user/repo for code"]
+        })
+        result = extract_urls_polars_df(df, id_col="id", content_col="content")
+        urls = result["urls"][0]
+        assert any("github.com/user/repo" in u["url"] for u in urls)
+
+    def test_native_finds_pypi_urls(self):
+        """Native extraction finds PyPI URLs."""
+        import polars as pl
+        from extract_software_repos.polars_extraction import extract_urls_polars_df
+
+        df = pl.DataFrame({
+            "id": ["doc1"],
+            "content": ["Install from https://pypi.org/project/mypackage"]
+        })
+        result = extract_urls_polars_df(df, id_col="id", content_col="content")
+        urls = result["urls"][0]
+        assert any("pypi.org/project/mypackage" in u["url"] for u in urls)
