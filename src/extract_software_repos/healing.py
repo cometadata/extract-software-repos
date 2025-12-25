@@ -3,7 +3,9 @@
 import re
 import uuid
 from collections import Counter
-from typing import Dict, List, Tuple
+from multiprocessing import Pool, cpu_count
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
 
 import ftfy
 import mdformat
@@ -407,3 +409,73 @@ def heal_text(content: str) -> Tuple[str, List[str]]:
     warnings.extend(validation_warnings)
 
     return text, warnings
+
+
+def _heal_row(args: Tuple[str, str]) -> Tuple[str, str]:
+    """Heal a single row. Worker function for multiprocessing."""
+    content, content_field = args
+    if content:
+        healed, warnings = heal_text(content)
+        return healed, "; ".join(warnings) if warnings else ""
+    return "", ""
+
+
+def heal_parquet_parallel(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    content_field: str = "content",
+    workers: Optional[int] = None,
+    chunk_size: int = 1000,
+) -> dict:
+    """Heal parquet file using parallel processing.
+
+    Args:
+        input_path: Path to input parquet file.
+        output_path: Path to output parquet file.
+        content_field: Column containing text to heal.
+        workers: Number of parallel workers (default: CPU count).
+        chunk_size: Rows per chunk for parallel processing.
+
+    Returns:
+        Stats dict with total, healed, warnings counts.
+    """
+    import polars as pl
+
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+    workers = workers or cpu_count()
+
+    # Read full dataframe
+    df = pl.read_parquet(input_path)
+    total_rows = len(df)
+
+    # Prepare data for parallel processing
+    content_list = df[content_field].to_list()
+    args_list = [(content, content_field) for content in content_list]
+
+    # Process in parallel
+    with Pool(workers) as pool:
+        results = pool.map(_heal_row, args_list)
+
+    # Extract results
+    healed_content = [r[0] for r in results]
+    warnings_list = [r[1] for r in results]
+
+    # Update dataframe with healed content
+    result = df.with_columns([
+        pl.Series(content_field, healed_content),
+        pl.Series("_heal_warnings", warnings_list),
+    ])
+
+    # Remove warnings column before writing (keep it internal)
+    result_clean = result.drop("_heal_warnings")
+    result_clean.write_parquet(output_path)
+
+    # Compute stats
+    warning_count = sum(1 for w in warnings_list if w)
+
+    return {
+        "total": total_rows,
+        "healed": total_rows - warning_count,
+        "warnings": warning_count,
+    }

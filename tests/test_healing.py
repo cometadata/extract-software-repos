@@ -208,3 +208,63 @@ class TestHealText:
         result, warnings = heal_text("")
         assert result == ""
         assert len(warnings) > 0
+
+
+import tempfile
+from pathlib import Path
+import polars as pl
+
+
+class TestParallelHealing:
+    """Test parallel healing with multiprocessing."""
+
+    def test_heals_parquet_parallel(self):
+        from extract_software_repos.healing import heal_parquet_parallel
+
+        df = pl.DataFrame({
+            "id": ["doc1", "doc2"],
+            "content": [
+                "This is some text with git-\nhub.com/user/repo link",
+                "Another doc with py-\npi.org/project/pkg"
+            ]
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = Path(tmpdir) / "input.parquet"
+            output_path = Path(tmpdir) / "output.parquet"
+            df.write_parquet(input_path)
+
+            stats = heal_parquet_parallel(
+                input_path,
+                output_path,
+                content_field="content",
+                workers=2,
+            )
+
+            assert stats["total"] == 2
+            assert output_path.exists()
+
+            result = pl.read_parquet(output_path)
+            # Check hyphenation was fixed
+            assert "github.com" in result["content"][0]
+            assert "pypi.org" in result["content"][1]
+
+    def test_preserves_all_columns(self):
+        from extract_software_repos.healing import heal_parquet_parallel
+
+        df = pl.DataFrame({
+            "id": ["doc1"],
+            "content": ["Some text"],
+            "extra_col": ["preserved"]
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = Path(tmpdir) / "input.parquet"
+            output_path = Path(tmpdir) / "output.parquet"
+            df.write_parquet(input_path)
+
+            heal_parquet_parallel(input_path, output_path, content_field="content")
+
+            result = pl.read_parquet(output_path)
+            assert "extra_col" in result.columns
+            assert result["extra_col"][0] == "preserved"
