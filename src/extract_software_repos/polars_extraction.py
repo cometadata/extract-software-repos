@@ -224,7 +224,7 @@ def process_parquet_polars(
     heal_markdown: bool = False,
     progress_callback: Optional[Callable[[int, int, int], None]] = None,
 ) -> dict:
-    """Process parquet file with Polars for high-performance extraction."""
+    """Process parquet file with Polars in chunks for memory efficiency."""
     parquet_path = Path(parquet_path)
     output_path = Path(output_path)
 
@@ -236,49 +236,52 @@ def process_parquet_polars(
         "healing_warnings": 0,
     }
 
-    df = pl.read_parquet(parquet_path)
-
-    if heal_markdown:
-        from .healing import heal_text
-        healed_content = []
-        for content in df[content_field].to_list():
-            if content:
-                healed, warnings = heal_text(content)
-                healed_content.append(healed)
-                if warnings:
-                    stats["healing_warnings"] += 1
-            else:
-                healed_content.append("")
-        df = df.with_columns(pl.Series(content_field, healed_content))
-
-    result = extract_urls_polars_df(df, id_col=id_field, content_col=content_field)
+    total_rows = pl.scan_parquet(parquet_path).select(pl.len()).collect().item()
 
     with open(output_path, "w", encoding="utf-8") as f:
-        for row in result.iter_rows(named=True):
-            doc_id = row["id"]
-            urls = row["urls"]
+        for offset in range(0, total_rows, chunk_size):
+            chunk = pl.scan_parquet(parquet_path).slice(offset, chunk_size).collect()
 
-            stats["total_papers"] += 1
+            if heal_markdown:
+                from .healing import heal_text
+                healed_content = []
+                for content in chunk[content_field].to_list():
+                    if content:
+                        healed, warnings = heal_text(content)
+                        healed_content.append(healed)
+                        if warnings:
+                            stats["healing_warnings"] += 1
+                    else:
+                        healed_content.append("")
+                chunk = chunk.with_columns(pl.Series(content_field, healed_content))
 
-            if urls:
-                arxiv_id = parse_arxiv_id(doc_id) if doc_id else None
+            result = extract_urls_polars_df(chunk, id_col=id_field, content_col=content_field)
 
-                if arxiv_id:
-                    stats["papers_with_urls"] += 1
-                    stats["total_urls"] += len(urls)
+            for row in result.iter_rows(named=True):
+                doc_id = row["id"]
+                urls = row["urls"]
 
-                    for url_info in urls:
-                        url_type = url_info["type"]
-                        stats["urls_by_type"][url_type] = stats["urls_by_type"].get(url_type, 0) + 1
+                stats["total_papers"] += 1
 
-                    record = {
-                        "arxiv_id": arxiv_id,
-                        "doi": derive_doi(arxiv_id),
-                        "urls": urls,
-                    }
-                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                if urls:
+                    arxiv_id = parse_arxiv_id(doc_id) if doc_id else None
 
-            if progress_callback:
-                progress_callback(stats["total_papers"], stats["papers_with_urls"], stats["total_urls"])
+                    if arxiv_id:
+                        stats["papers_with_urls"] += 1
+                        stats["total_urls"] += len(urls)
+
+                        for url_info in urls:
+                            url_type = url_info["type"]
+                            stats["urls_by_type"][url_type] = stats["urls_by_type"].get(url_type, 0) + 1
+
+                        record = {
+                            "arxiv_id": arxiv_id,
+                            "doi": derive_doi(arxiv_id),
+                            "urls": urls,
+                        }
+                        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+                if progress_callback:
+                    progress_callback(stats["total_papers"], stats["papers_with_urls"], stats["total_urls"])
 
     return stats
