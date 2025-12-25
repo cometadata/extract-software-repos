@@ -196,6 +196,33 @@ def normalize_urls(df: pl.DataFrame) -> pl.DataFrame:
     return result
 
 
+def filter_urls(df: pl.DataFrame) -> pl.DataFrame:
+    """Filter out excluded URLs.
+
+    Removes:
+    - GitHub Pages URLs (.github.io)
+    - Excluded paths (/wiki, /issues, /pull, etc.)
+    - Data files in /blob/ or /raw/ paths
+
+    Args:
+        df: DataFrame with doc_id, url, type columns.
+
+    Returns:
+        Filtered DataFrame.
+    """
+    return df.filter(
+        # Not GitHub Pages
+        ~pl.col("url").str.contains(GITHUB_PAGES_PATTERN)
+        # Not excluded paths
+        & ~pl.col("url").str.contains(EXCLUDED_PATHS_PATTERN)
+        # Not data files in blob/raw paths
+        & ~(
+            pl.col("url").str.contains(r"/(?:blob|raw)/")
+            & pl.col("url").str.contains(DATA_EXTENSIONS_PATTERN)
+        )
+    )
+
+
 def _extract_and_normalize_urls(text: str) -> List[Dict[str, str]]:
     """Extract and normalize URLs from text.
 

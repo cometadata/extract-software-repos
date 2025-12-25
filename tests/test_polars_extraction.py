@@ -290,3 +290,75 @@ class TestNormalization:
         })
         result = normalize_urls(df)
         assert not result["url"][0].endswith(").")
+
+
+class TestFiltering:
+    """Test URL filtering."""
+
+    def test_filter_urls_exists(self):
+        from extract_software_repos.polars_extraction import filter_urls
+        assert callable(filter_urls)
+
+    def test_filter_removes_wiki_urls(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import filter_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1", "doc1"],
+            "url": ["https://github.com/user/repo", "https://github.com/user/repo/wiki/Page"],
+            "type": ["github", "github"],
+        })
+        result = filter_urls(df)
+        assert len(result) == 1
+        assert "wiki" not in result["url"][0]
+
+    def test_filter_removes_issues_urls(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import filter_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1", "doc1"],
+            "url": ["https://github.com/user/repo", "https://github.com/user/repo/issues/123"],
+            "type": ["github", "github"],
+        })
+        result = filter_urls(df)
+        assert len(result) == 1
+        assert "issues" not in result["url"][0]
+
+    def test_filter_removes_github_pages(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import filter_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1", "doc1"],
+            "url": ["https://github.com/user/repo", "https://user.github.io/project"],
+            "type": ["github", "github"],
+        })
+        result = filter_urls(df)
+        assert len(result) == 1
+        assert "github.io" not in result["url"][0]
+
+    def test_filter_removes_data_files_in_blob(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import filter_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1", "doc1"],
+            "url": ["https://github.com/user/repo", "https://github.com/user/repo/blob/main/data.csv"],
+            "type": ["github", "github"],
+        })
+        result = filter_urls(df)
+        assert len(result) == 1
+        assert "data.csv" not in result["url"][0]
+
+    def test_filter_keeps_valid_urls(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import filter_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1"],
+            "url": ["https://github.com/user/repo"],
+            "type": ["github"],
+        })
+        result = filter_urls(df)
+        assert len(result) == 1
