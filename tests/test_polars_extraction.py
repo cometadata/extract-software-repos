@@ -190,3 +190,47 @@ class TestFilterPatterns:
         import re
         from extract_software_repos.polars_extraction import DATA_EXTENSIONS_PATTERN
         assert re.search(DATA_EXTENSIONS_PATTERN, "file.csv")
+
+
+class TestNativeExtraction:
+    """Test Polars-native URL extraction."""
+
+    def test_extract_urls_native_exists(self):
+        from extract_software_repos.polars_extraction import extract_urls_native
+        assert callable(extract_urls_native)
+
+    def test_extract_urls_native_returns_dataframe(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import extract_urls_native
+
+        df = pl.DataFrame({
+            "id": ["doc1"],
+            "content": ["Check https://github.com/user/repo"]
+        })
+        result = extract_urls_native(df, id_col="id", content_col="content")
+        assert isinstance(result, pl.DataFrame)
+
+    def test_extract_urls_native_has_correct_columns(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import extract_urls_native
+
+        df = pl.DataFrame({
+            "id": ["doc1"],
+            "content": ["Check https://github.com/user/repo"]
+        })
+        result = extract_urls_native(df, id_col="id", content_col="content")
+        assert "doc_id" in result.columns
+        assert "url" in result.columns
+        assert "type" in result.columns
+
+    def test_extract_urls_native_extracts_github(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import extract_urls_native
+
+        df = pl.DataFrame({
+            "id": ["doc1"],
+            "content": ["Check https://github.com/user/repo for code"]
+        })
+        result = extract_urls_native(df, id_col="id", content_col="content")
+        assert len(result) >= 1
+        assert any("github.com/user/repo" in url for url in result["url"].to_list())

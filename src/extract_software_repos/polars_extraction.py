@@ -81,6 +81,60 @@ def preprocess_content(col: str) -> pl.Expr:
     return expr.alias(col)
 
 
+def extract_urls_native(
+    df: pl.DataFrame,
+    id_col: str = "relative_path",
+    content_col: str = "content",
+) -> pl.DataFrame:
+    """Extract URLs using Polars-native operations.
+
+    Returns exploded DataFrame with one row per URL found.
+
+    Args:
+        df: Input DataFrame with id and content columns.
+        id_col: Column containing document IDs.
+        content_col: Column containing text content.
+
+    Returns:
+        DataFrame with columns: doc_id, url, type (one row per URL).
+    """
+    # Apply preprocessing
+    df = df.with_columns(preprocess_content(content_col))
+
+    # Extract URLs for each type and collect results
+    all_extractions = []
+
+    for url_type, pattern in POLARS_URL_PATTERNS.items():
+        # Extract all matches for this pattern
+        extracted = df.select([
+            pl.col(id_col).alias("doc_id"),
+            pl.col(content_col).str.extract_all(pattern).alias("raw_urls"),
+            pl.lit(url_type).alias("type"),
+        ])
+
+        # Explode to one row per URL
+        exploded = extracted.explode("raw_urls").rename({"raw_urls": "url"})
+
+        # Filter out nulls (no matches)
+        exploded = exploded.filter(pl.col("url").is_not_null())
+
+        if len(exploded) > 0:
+            all_extractions.append(exploded)
+
+    # Combine all extractions
+    if all_extractions:
+        result = pl.concat(all_extractions)
+    else:
+        # Return empty DataFrame with correct schema
+        result = pl.DataFrame({
+            "doc_id": pl.Series([], dtype=pl.Utf8),
+            "url": pl.Series([], dtype=pl.Utf8),
+            "type": pl.Series([], dtype=pl.Utf8),
+        })
+
+    return result
+
+
 def _extract_and_normalize_urls(text: str) -> List[Dict[str, str]]:
     """Extract and normalize URLs from text.
 
