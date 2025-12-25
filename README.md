@@ -85,11 +85,11 @@ extract-software-repos validate enrichments.jsonl -o validated.jsonl
 
 ## Output Format
 
-### Enrichment Records (extract-software)
+Both `extract-software` and `extract-urls` output enrichment records compatible with [datacite-enrichment](https://github.com/cometadata/datacite-enrichment):
 
 ```json
 {
-  "doi": "10.1234/example",
+  "doi": "10.48550/arxiv.2308.11197",
   "action": "insert_child",
   "field": "relatedIdentifiers",
   "enrichedValue": {
@@ -103,18 +103,7 @@ extract-software-repos validate enrichments.jsonl -o validated.jsonl
 }
 ```
 
-### URL Extraction Results (extract-urls)
-
-```json
-{
-  "arxiv_id": "2308.11197",
-  "doi": "10.48550/arxiv.2308.11197",
-  "urls": [
-    {"url": "https://github.com/user/repo", "type": "github"},
-    {"url": "https://pypi.org/project/package", "type": "pypi"}
-  ]
-}
-```
+One record is output per URL found.
 
 ## Pipeline Example
 

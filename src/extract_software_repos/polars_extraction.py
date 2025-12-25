@@ -6,7 +6,7 @@ from typing import Callable, Dict, List, Optional, Union
 
 import polars as pl
 
-from .processing import parse_arxiv_id, derive_doi
+from .processing import parse_arxiv_id, derive_doi, create_enrichment
 
 SPACED_DOMAINS = [
     ("github.com", r"g\s*i\s*t\s*h\s*u\s*b\s*\.\s*c\s*o\s*m"),
@@ -268,18 +268,16 @@ def process_parquet_polars(
 
                     if arxiv_id:
                         stats["papers_with_urls"] += 1
-                        stats["total_urls"] += len(urls)
+                        doi = derive_doi(arxiv_id)
 
                         for url_info in urls:
+                            url = url_info["url"]
                             url_type = url_info["type"]
+                            stats["total_urls"] += 1
                             stats["urls_by_type"][url_type] = stats["urls_by_type"].get(url_type, 0) + 1
 
-                        record = {
-                            "arxiv_id": arxiv_id,
-                            "doi": derive_doi(arxiv_id),
-                            "urls": urls,
-                        }
-                        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                            enrichment = create_enrichment(doi, url)
+                            f.write(json.dumps(enrichment, ensure_ascii=False) + "\n")
 
                 if progress_callback:
                     progress_callback(stats["total_papers"], stats["papers_with_urls"], stats["total_urls"])
