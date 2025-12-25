@@ -14,7 +14,9 @@ from .extraction import (
 from .polars_extraction import (
     preprocess_content,
     extract_urls_polars_df,
+    extract_urls_polars_native,
     process_parquet_polars,
+    POLARS_URL_PATTERNS,
 )
 
 from .healing import (
@@ -45,7 +47,9 @@ __all__ = [
     # Polars extraction
     "preprocess_content",
     "extract_urls_polars_df",
+    "extract_urls_polars_native",
     "process_parquet_polars",
+    "POLARS_URL_PATTERNS",
     # Healing
     "heal_text",
     "heal_parquet_parallel",
