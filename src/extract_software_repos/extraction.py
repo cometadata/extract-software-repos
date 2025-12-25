@@ -74,6 +74,32 @@ SOFTWARE_ARCHIVE_PATTERNS = {
     ),
 }
 
+# Combined pattern for efficient single-pass extraction with Polars
+# Uses non-capturing groups for alternation, capturing groups for extraction
+COMBINED_URL_PATTERN = r"""
+    (?:https?://)?(?:www\.)?
+    (?:
+        # Code repositories
+        (?P<github>github\.com/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(?:/[^\s)\"'<>]*)?)|
+        (?P<gitlab>gitlab\.com/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(?:/[^\s)\"'<>]*)?)|
+        (?P<bitbucket>bitbucket\.org/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(?:/[^\s)\"'<>]*)?)|
+        (?P<sourceforge>sourceforge\.net/projects/[a-zA-Z0-9_-]+)|
+        (?P<codeberg>codeberg\.org/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(?:/[^\s)\"'<>]*)?)|
+        # Package registries
+        (?P<pypi>pypi\.org/project/[a-zA-Z0-9_-]+)|
+        (?P<cran>cran\.r-project\.org/package=[a-zA-Z0-9_.]+)|
+        (?P<npm>npmjs\.com/package/[a-zA-Z0-9@/._-]+)|
+        (?P<conda>anaconda\.org/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)|
+        (?P<rubygems>rubygems\.org/gems/[a-zA-Z0-9_-]+)|
+        (?P<cargo>crates\.io/crates/[a-zA-Z0-9_-]+)|
+        (?P<packagist>packagist\.org/packages/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+)|
+        (?P<bioconductor>bioconductor\.org/packages/[a-zA-Z0-9_.]+)|
+        # Archives
+        (?P<software_heritage>archive\.softwareheritage\.org/[^\s)\"'<>]+)|
+        (?P<codeocean>codeocean\.com/capsule/[a-zA-Z0-9_-]+)
+    )
+"""
+
 KNOWN_DOMAINS = [
     "github.com", "gitlab.com", "bitbucket.org", "sourceforge.net",
     "codeberg.org", "pypi.org", "cran.r-project.org", "npmjs.com",
