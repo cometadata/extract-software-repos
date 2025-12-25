@@ -6,7 +6,6 @@ from typing import Callable, Dict, List, Optional, Union
 
 import polars as pl
 
-from .extraction import extract_urls_with_types
 from .processing import parse_arxiv_id, derive_doi
 
 # Domains that need spaced-character fixing
