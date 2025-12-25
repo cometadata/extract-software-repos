@@ -32,7 +32,7 @@ extract-software-repos extract papers.parquet -o enrichments.jsonl
 - `-c, --chunk-size INT` - Rows per chunk (default: 50000)
 - `--id-field` - Column with arXiv ID (default: `relative_path`)
 - `--content-field` - Column with text (default: `content`)
-- `--heal-markdown` - Preprocess text through markdown healing before extraction
+- `--heal-fulltext` - Preprocess text through healing before extraction
 
 ### Extract from DataCite Records
 
@@ -42,20 +42,20 @@ Scan record abstracts for software URLs:
 extract-software-repos extract records.jsonl.gz --from-datacite-abstract -o enrichments.jsonl
 ```
 
-### Heal Markdown Text
+### Heal Fulltext
 
 Clean malformed PDF-extracted text before or during extraction:
 
 ```bash
 # Heal during extraction
-extract-software-repos extract papers.parquet -o enrichments.jsonl --heal-markdown
+extract-software-repos extract papers.parquet -o enrichments.jsonl --heal-fulltext
 
 # Heal first, then extract
-extract-software-repos heal-text papers.parquet -o papers_healed.parquet
+extract-software-repos heal-fulltext papers.parquet -o papers_healed.parquet
 extract-software-repos extract papers_healed.parquet -o enrichments.jsonl
 ```
 
-**heal-text Options:**
+**heal-fulltext Options:**
 - `-o, --output PATH` - Output file (default: `<input>_healed.parquet`)
 - `--content-field` - Column with text (auto-detected)
 - `-w, --workers INT` - Parallel workers (default: CPU count)
@@ -106,7 +106,7 @@ One record is output per URL found.
 
 ```bash
 # 1. Extract URLs from full-text (with healing for better extraction)
-extract-software-repos extract papers.parquet -o enrichments.jsonl --heal-markdown
+extract-software-repos extract papers.parquet -o enrichments.jsonl --heal-fulltext
 
 # 2. Validate URLs exist
 extract-software-repos validate enrichments.jsonl -o enrichments_valid.jsonl
