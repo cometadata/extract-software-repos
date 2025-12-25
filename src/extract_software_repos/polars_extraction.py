@@ -223,6 +223,36 @@ def filter_urls(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def deduplicate_urls(df: pl.DataFrame) -> pl.DataFrame:
+    """Deduplicate URLs per document.
+
+    Uses base URL (without protocol/www) for deduplication.
+    Keeps first occurrence of each unique base URL per document.
+
+    Args:
+        df: DataFrame with doc_id, url, type columns.
+
+    Returns:
+        Deduplicated DataFrame.
+    """
+    # Create base URL for deduplication
+    result = df.with_columns([
+        pl.col("url")
+            .str.replace(r"^https?://", "")
+            .str.replace(r"^www\.", "")
+            .str.to_lowercase()
+            .alias("base_url")
+    ])
+
+    # Keep first occurrence per doc per base_url
+    result = result.unique(subset=["doc_id", "base_url"], keep="first")
+
+    # Drop temporary column
+    result = result.drop("base_url")
+
+    return result
+
+
 def _extract_and_normalize_urls(text: str) -> List[Dict[str, str]]:
     """Extract and normalize URLs from text.
 

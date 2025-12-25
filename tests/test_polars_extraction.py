@@ -362,3 +362,48 @@ class TestFiltering:
         })
         result = filter_urls(df)
         assert len(result) == 1
+
+
+class TestDeduplication:
+    """Test URL deduplication."""
+
+    def test_deduplicate_urls_exists(self):
+        from extract_software_repos.polars_extraction import deduplicate_urls
+        assert callable(deduplicate_urls)
+
+    def test_deduplicate_removes_exact_duplicates(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import deduplicate_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1", "doc1"],
+            "url": ["https://github.com/user/repo", "https://github.com/user/repo"],
+            "type": ["github", "github"],
+        })
+        result = deduplicate_urls(df)
+        assert len(result) == 1
+
+    def test_deduplicate_keeps_different_repos(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import deduplicate_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1", "doc1"],
+            "url": ["https://github.com/user/repo1", "https://github.com/user/repo2"],
+            "type": ["github", "github"],
+        })
+        result = deduplicate_urls(df)
+        assert len(result) == 2
+
+    def test_deduplicate_per_document(self):
+        import polars as pl
+        from extract_software_repos.polars_extraction import deduplicate_urls
+
+        df = pl.DataFrame({
+            "doc_id": ["doc1", "doc2"],
+            "url": ["https://github.com/user/repo", "https://github.com/user/repo"],
+            "type": ["github", "github"],
+        })
+        result = deduplicate_urls(df)
+        # Same URL in different docs should both be kept
+        assert len(result) == 2
