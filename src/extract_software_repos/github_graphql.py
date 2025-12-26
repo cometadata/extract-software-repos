@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -73,6 +73,251 @@ class GitHubValidationResult:
     url: str
     valid: bool
     error: Optional[str] = None
+
+
+@dataclass
+class GitHubPromotionData:
+    """Promotion-related data fetched from GitHub."""
+    url: str
+    description: Optional[str] = None
+    readme_content: Optional[str] = None
+    contributors: List[Dict[str, Any]] = field(default_factory=list)
+    fetch_error: Optional[str] = None
+
+
+def build_promotion_query(repos: List[Tuple[str, str]]) -> str:
+    """Build a GraphQL query for fetching promotion data.
+
+    Fetches description, README (multiple variants), and contributors.
+
+    Args:
+        repos: List of (owner, repo) tuples
+
+    Returns:
+        GraphQL query string
+    """
+    parts = []
+    for i, (owner, repo) in enumerate(repos):
+        owner_escaped = owner.replace('"', '\\"')
+        repo_escaped = repo.replace('"', '\\"')
+        parts.append(f'''
+            repo{i}: repository(owner: "{owner_escaped}", name: "{repo_escaped}") {{
+                description
+                readme_md: object(expression: "HEAD:README.md") {{ ... on Blob {{ text }} }}
+                readme_rst: object(expression: "HEAD:README.rst") {{ ... on Blob {{ text }} }}
+                readme_txt: object(expression: "HEAD:README.txt") {{ ... on Blob {{ text }} }}
+                readme_plain: object(expression: "HEAD:README") {{ ... on Blob {{ text }} }}
+                mentionableUsers(first: 100) {{
+                    nodes {{
+                        login
+                        name
+                        email
+                    }}
+                }}
+            }}
+        ''')
+
+    return "query { " + " ".join(parts) + " }"
+
+
+PROMOTION_BATCH_SIZE = 50  # Smaller batch for heavier queries
+
+
+class GitHubPromotionFetcher:
+    """Fetches promotion data from GitHub repositories."""
+
+    def __init__(
+        self,
+        token: Optional[str] = None,
+        batch_size: int = PROMOTION_BATCH_SIZE,
+        max_retries: int = 3,
+    ):
+        self.token = token or os.environ.get("GITHUB_TOKEN")
+        if not self.token:
+            raise ValueError("GitHub token required. Set GITHUB_TOKEN environment variable.")
+
+        self.batch_size = batch_size
+        self.max_retries = max_retries
+        self.rate_limit: Optional[RateLimitInfo] = None
+
+    def _get_headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json",
+        }
+
+    def _update_rate_limit(self, headers: Dict[str, str]) -> None:
+        """Update rate limit info from response headers."""
+        try:
+            remaining = int(headers.get("X-RateLimit-Remaining", -1))
+            reset_ts = int(headers.get("X-RateLimit-Reset", 0))
+            limit = int(headers.get("X-RateLimit-Limit", 5000))
+
+            if remaining < 0 or reset_ts == 0:
+                return
+
+            self.rate_limit = RateLimitInfo(
+                remaining=remaining,
+                reset_at=datetime.fromtimestamp(reset_ts, tz=timezone.utc),
+                limit=limit,
+            )
+        except (ValueError, TypeError):
+            pass
+
+    def _parse_promotion_response(
+        self,
+        urls: List[str],
+        data: Dict[str, Any],
+    ) -> List[GitHubPromotionData]:
+        """Parse GraphQL response into promotion data."""
+        results = []
+        response_data = data.get("data", {})
+
+        for i, url in enumerate(urls):
+            repo_key = f"repo{i}"
+            repo_data = response_data.get(repo_key)
+
+            if repo_data is None:
+                results.append(GitHubPromotionData(url=url, fetch_error="not_found"))
+                continue
+
+            # Extract description
+            description = repo_data.get("description")
+
+            # Extract README (try variants in order)
+            readme_content = None
+            for readme_key in ["readme_md", "readme_rst", "readme_txt", "readme_plain"]:
+                readme_obj = repo_data.get(readme_key)
+                if readme_obj and readme_obj.get("text"):
+                    readme_content = readme_obj["text"]
+                    # Truncate very large READMEs (>1MB)
+                    if len(readme_content) > 1_000_000:
+                        readme_content = readme_content[:1_000_000]
+                    break
+
+            # Extract contributors
+            contributors = []
+            users_data = repo_data.get("mentionableUsers", {})
+            for user in users_data.get("nodes", []):
+                if user:
+                    contributors.append({
+                        "login": user.get("login"),
+                        "name": user.get("name"),
+                        "email": user.get("email"),
+                    })
+
+            results.append(GitHubPromotionData(
+                url=url,
+                description=description,
+                readme_content=readme_content,
+                contributors=contributors,
+            ))
+
+        return results
+
+    async def fetch_batch(
+        self,
+        urls: List[str],
+        session: aiohttp.ClientSession,
+    ) -> List[GitHubPromotionData]:
+        """Fetch promotion data for a batch of URLs.
+
+        Args:
+            urls: List of GitHub URLs
+            session: aiohttp session
+
+        Returns:
+            List of promotion data
+        """
+        url_to_repo: Dict[str, Tuple[str, str]] = {}
+        results: List[GitHubPromotionData] = []
+
+        for url in urls:
+            parsed = parse_github_url(url)
+            if parsed is None:
+                results.append(GitHubPromotionData(url=url, fetch_error="invalid_url"))
+            else:
+                url_to_repo[url] = parsed
+
+        if not url_to_repo:
+            return results
+
+        repos = list(url_to_repo.values())
+        url_list = list(url_to_repo.keys())
+        query = build_promotion_query(repos)
+
+        for attempt in range(self.max_retries):
+            try:
+                async with session.post(
+                    GITHUB_GRAPHQL_URL,
+                    json={"query": query},
+                    headers=self._get_headers(),
+                ) as response:
+                    self._update_rate_limit(dict(response.headers))
+
+                    if response.status == 200:
+                        data = await response.json()
+                        return results + self._parse_promotion_response(url_list, data)
+                    elif response.status == 401:
+                        raise ValueError("Invalid GitHub token")
+                    elif response.status == 403:
+                        if self.rate_limit and self.rate_limit.remaining == 0:
+                            raise RateLimitExceeded(self.rate_limit)
+                    elif response.status >= 500:
+                        pass
+                    else:
+                        error_text = await response.text()
+                        logger.warning(f"GitHub API error {response.status}: {error_text}")
+
+                await asyncio.sleep(2 ** attempt)
+
+            except aiohttp.ClientError as e:
+                logger.warning(f"Network error on attempt {attempt + 1}: {e}")
+                await asyncio.sleep(2 ** attempt)
+
+        for url in url_list:
+            results.append(GitHubPromotionData(url=url, fetch_error="request_failed"))
+
+        return results
+
+    async def fetch_promotion_data(
+        self,
+        urls: List[str],
+        progress_callback=None,
+        batch_callback=None,
+    ) -> List[GitHubPromotionData]:
+        """Fetch promotion data for multiple GitHub URLs.
+
+        Args:
+            urls: List of GitHub URLs
+            progress_callback: Optional callback(completed, total)
+            batch_callback: Optional callback(batch_results)
+
+        Returns:
+            List of promotion data
+        """
+        results: List[GitHubPromotionData] = []
+        total = len(urls)
+        last_batch_time = 0.0
+
+        async with aiohttp.ClientSession() as session:
+            for i in range(0, total, self.batch_size):
+                elapsed = time.monotonic() - last_batch_time
+                if elapsed < MIN_BATCH_INTERVAL and last_batch_time > 0:
+                    await asyncio.sleep(MIN_BATCH_INTERVAL - elapsed)
+
+                last_batch_time = time.monotonic()
+                batch = urls[i:i + self.batch_size]
+                batch_results = await self.fetch_batch(batch, session)
+                results.extend(batch_results)
+
+                if batch_callback:
+                    batch_callback(batch_results)
+
+                if progress_callback:
+                    progress_callback(len(results), total)
+
+        return results
 
 
 class GitHubGraphQLValidator:
