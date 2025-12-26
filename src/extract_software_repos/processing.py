@@ -21,8 +21,15 @@ def _iso_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def create_enrichment(doi: str, url: str) -> dict:
-    """Create an enrichment record for a software URL."""
+def create_enrichment(doi: str, url: str, relation_type: str = "IsSupplementedBy") -> dict:
+    """Create an enrichment record for a software URL.
+
+    Args:
+        doi: The DOI of the source record.
+        url: The software URL found.
+        relation_type: DataCite relation type. Use "IsSupplementedBy" for records
+            extraction (default) and "References" for fulltext extraction.
+    """
     timestamp = _iso_timestamp()
     return {
         "doi": doi,
@@ -47,7 +54,7 @@ def create_enrichment(doi: str, url: str) -> dict:
         "enrichedValue": {
             "relatedIdentifier": url,
             "relatedIdentifierType": "URL",
-            "relationType": "IsSupplementedBy",
+            "relationType": relation_type,
         },
         "created": timestamp,
         "updated": timestamp,

@@ -276,7 +276,7 @@ def process_parquet_polars(
                             stats["total_urls"] += 1
                             stats["urls_by_type"][url_type] = stats["urls_by_type"].get(url_type, 0) + 1
 
-                            enrichment = create_enrichment(doi, url)
+                            enrichment = create_enrichment(doi, url, relation_type="References")
                             f.write(json.dumps(enrichment, ensure_ascii=False) + "\n")
 
                 if progress_callback:

@@ -45,6 +45,16 @@ class TestCreateEnrichment:
         assert enrichment["enrichedValue"]["relatedIdentifierType"] == "URL"
         assert enrichment["enrichedValue"]["relationType"] == "IsSupplementedBy"
 
+    def test_custom_relation_type(self):
+        """Test that custom relation_type is used (e.g., References for fulltext)."""
+        enrichment = create_enrichment("10.1234/test", "https://github.com/user/repo", relation_type="References")
+        assert enrichment["enrichedValue"]["relationType"] == "References"
+
+    def test_default_relation_type_is_supplemented_by(self):
+        """Test that default relation_type is IsSupplementedBy (for records extraction)."""
+        enrichment = create_enrichment("10.1234/test", "https://github.com/user/repo")
+        assert enrichment["enrichedValue"]["relationType"] == "IsSupplementedBy"
+
     def test_includes_source(self):
         enrichment = create_enrichment("10.1234/test", "https://github.com/user/repo")
         assert len(enrichment["sources"]) == 1
