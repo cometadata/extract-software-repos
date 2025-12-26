@@ -545,13 +545,14 @@ class Validator:
                 self.checkpoint.save_result(url, False, "graphql", "no_token")
             return
 
-        try:
-            results = asyncio.run(validator.validate_urls(urls, progress_callback))
-
-            for r in results:
+        def save_batch(batch_results):
+            for r in batch_results:
                 result = {"url": r.url, "valid": r.valid, "method": "graphql", "error": r.error}
                 self.results[r.url] = result
                 self.checkpoint.save_result(r.url, r.valid, "graphql", r.error)
+
+        try:
+            asyncio.run(validator.validate_urls(urls, progress_callback, save_batch))
 
         except RateLimitExceeded as e:
             if self.wait_for_ratelimit:

@@ -5,6 +5,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 BATCH_SIZE = 100  # Max repos per query
+MIN_BATCH_INTERVAL = 3.0  # Seconds between batches to stay under 2000 points/min
 
 
 def parse_github_url(url: str) -> Optional[Tuple[str, str]]:
@@ -215,24 +217,35 @@ class GitHubGraphQLValidator:
         self,
         urls: List[str],
         progress_callback=None,
+        batch_callback=None,
     ) -> List[GitHubValidationResult]:
         """Validate multiple GitHub URLs in batches.
 
         Args:
             urls: List of GitHub URLs
             progress_callback: Optional callback(completed, total)
+            batch_callback: Optional callback(batch_results) called after each batch
 
         Returns:
             List of validation results
         """
         results: List[GitHubValidationResult] = []
         total = len(urls)
+        last_batch_time = 0.0
 
         async with aiohttp.ClientSession() as session:
             for i in range(0, total, self.batch_size):
+                elapsed = time.monotonic() - last_batch_time
+                if elapsed < MIN_BATCH_INTERVAL and last_batch_time > 0:
+                    await asyncio.sleep(MIN_BATCH_INTERVAL - elapsed)
+
+                last_batch_time = time.monotonic()
                 batch = urls[i:i + self.batch_size]
                 batch_results = await self.validate_batch(batch, session)
                 results.extend(batch_results)
+
+                if batch_callback:
+                    batch_callback(batch_results)
 
                 if progress_callback:
                     progress_callback(len(results), total)
