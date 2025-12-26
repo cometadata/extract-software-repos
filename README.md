@@ -63,22 +63,31 @@ extract-software-repos extract papers_healed.parquet -o enrichments.jsonl
 
 ### Validate URLs
 
-Check if extracted URLs actually exist:
+Check if extracted URLs actually exist. Uses optimized validators:
+- **GitHub**: GraphQL API (batched, 100 repos/query)
+- **Package registries**: Async HTTP (PyPI, npm, CRAN, etc.)
+- **Other git hosts**: Parallel git ls-remote
+
+**Requires** `GITHUB_TOKEN` environment variable:
 
 ```bash
+export GITHUB_TOKEN=ghp_your_token_here
 extract-software-repos validate enrichments.jsonl -o validated.jsonl
 ```
 
 **Options:**
 - `-o, --output PATH` - Output file (default: `<input>_validated.jsonl`)
-- `-w, --workers INT` - Parallel workers (default: 10)
-- `-t, --timeout INT` - Timeout per URL in seconds (default: 10)
+- `-w, --workers INT` - Threads for git ls-remote (default: 50)
+- `--http-concurrency INT` - Max concurrent HTTP requests (default: 100)
+- `-t, --timeout INT` - Timeout per request in seconds (default: 5)
+- `--checkpoint PATH` - Checkpoint file for resume (default: `validation_cache.jsonl`)
+- `--ignore-checkpoint` - Start fresh, ignore existing checkpoint
+- `--wait-for-ratelimit` - Auto-wait when GitHub rate limited (up to 1 hour)
 - `--keep-invalid` - Include invalid URLs in output (marked as invalid)
 
-**Validation Methods:**
-- Git repositories: `git ls-remote`
-- Package registries: API/HTTP HEAD checks
-- Archives: HTTP HEAD requests
+**Performance:** ~20-40 minutes for 300K URLs (vs 5-50 hours with old method)
+
+**Resume:** If interrupted, re-run the same command. Cached URLs are skipped.
 
 ## Output Format
 
