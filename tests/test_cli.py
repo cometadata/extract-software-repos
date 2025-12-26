@@ -128,3 +128,38 @@ class TestHealFulltextCommand:
 
             assert result.exit_code == 0
             assert output_path.exists()
+
+
+class TestPromoteCommand:
+    """Test promote command."""
+
+    def test_help(self, runner):
+        result = runner.invoke(cli, ["promote", "--help"])
+        assert result.exit_code == 0
+        assert "Promote validated repo links" in result.output
+
+    def test_promote_command_exists(self):
+        """Test that promote command is registered."""
+        assert "promote" in [cmd for cmd in cli.commands.keys()]
+
+    def test_promote_requires_records_option(self, runner):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_file = Path(tmpdir) / "validated.jsonl"
+            input_file.write_text("{}\n")
+
+            result = runner.invoke(cli, [
+                "promote",
+                str(input_file),
+            ])
+
+            # Should fail because --records is required
+            assert result.exit_code != 0
+            assert "Missing option" in result.output or "required" in result.output.lower()
+
+    def test_promote_options_exist(self, runner):
+        result = runner.invoke(cli, ["promote", "--help"])
+        assert "--records" in result.output
+        assert "--record-type" in result.output
+        assert "--promotion-threshold" in result.output
+        assert "--name-similarity-threshold" in result.output
+        assert "--batch-size" in result.output

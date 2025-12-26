@@ -477,5 +477,136 @@ def heal_text_cmd(
     click.echo(f"  Output: {output}")
 
 
+@cli.command("promote")
+@click.argument("input_file", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--records",
+    type=click.Path(exists=True, path_type=Path),
+    required=True,
+    help="Paper records file (JSONL or JSONL.gz)"
+)
+@click.option(
+    "--record-type",
+    type=click.Choice(["datacite"]),
+    default="datacite",
+    help="Record format type (default: datacite)"
+)
+@click.option(
+    "--output", "-o",
+    type=click.Path(path_type=Path),
+    help="Output file (default: <input>_promoted.jsonl)"
+)
+@click.option(
+    "--promotion-threshold",
+    type=int,
+    default=2,
+    help="Minimum heuristic signals for promotion (default: 2)"
+)
+@click.option(
+    "--name-similarity-threshold",
+    type=float,
+    default=0.45,
+    help="Name similarity threshold (default: 0.45)"
+)
+@click.option(
+    "--batch-size",
+    type=int,
+    default=50,
+    help="GitHub API batch size (default: 50)"
+)
+@click.option(
+    "--log-level",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
+    default="INFO",
+    help="Logging level"
+)
+def promote_cmd(
+    input_file: Path,
+    records: Path,
+    record_type: str,
+    output: Optional[Path],
+    promotion_threshold: int,
+    name_similarity_threshold: float,
+    batch_size: int,
+    log_level: str,
+):
+    """Promote validated repo links to isSupplementedBy.
+
+    INPUT_FILE: Validated enrichment JSONL file
+
+    Uses heuristics to identify repos that are the paper's official
+    implementation: arXiv ID in README, name similarity, author matching.
+
+    Requires GITHUB_TOKEN environment variable.
+
+    Example:
+        export GITHUB_TOKEN=ghp_xxxx
+        extract-software-repos promote validated.jsonl --records papers.jsonl.gz
+    """
+    import os
+    from tqdm import tqdm
+    from .paper_records import extract_paper_info
+    from .promotion import PromotionEngine
+
+    _setup_logging(log_level)
+
+    if output is None:
+        output = input_file.parent / f"{input_file.stem}_promoted.jsonl"
+
+    # Check for GitHub token
+    if not os.environ.get("GITHUB_TOKEN"):
+        click.echo("Error: GITHUB_TOKEN not set", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"Promoting records from {input_file}")
+    click.echo(f"Paper records: {records}")
+    click.echo(f"Output: {output}")
+
+    # Load enrichment records
+    enrichment_records = list(_stream_jsonl(input_file))
+    click.echo(f"Loaded {len(enrichment_records):,} enrichment records")
+
+    # Load paper records
+    paper_infos = []
+    for record in _stream_jsonl(records):
+        paper_infos.append(extract_paper_info(record, record_type))
+    click.echo(f"Loaded {len(paper_infos):,} paper records")
+
+    # Run promotion
+    engine = PromotionEngine(
+        promotion_threshold=promotion_threshold,
+        name_similarity_threshold=name_similarity_threshold,
+        batch_size=batch_size,
+    )
+
+    stages = {}
+
+    def progress_callback(stage: str, completed: int, total: int):
+        if stage not in stages:
+            stages[stage] = tqdm(total=total, desc=stage, unit="items")
+        stages[stage].n = completed
+        stages[stage].refresh()
+
+    try:
+        output_records = engine.promote_records_sync(
+            enrichment_records, paper_infos, progress_callback
+        )
+    finally:
+        for pbar in stages.values():
+            pbar.close()
+
+    # Write output
+    with open(output, "w", encoding="utf-8") as f:
+        for record in output_records:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    promoted_count = sum(1 for r in output_records if r.get("_promotion", {}).get("promoted"))
+
+    click.echo("\nPromotion complete!")
+    click.echo(f"  Total records: {len(output_records):,}")
+    click.echo(f"  Promoted to isSupplementedBy: {promoted_count:,}")
+    click.echo(f"  Output: {output}")
+
+
 if __name__ == "__main__":
     cli()
