@@ -99,9 +99,12 @@ class GitHubGraphQLValidator:
     def _update_rate_limit(self, headers: Dict[str, str]) -> None:
         """Update rate limit info from response headers."""
         try:
-            remaining = int(headers.get("X-RateLimit-Remaining", 0))
+            remaining = int(headers.get("X-RateLimit-Remaining", -1))
             reset_ts = int(headers.get("X-RateLimit-Reset", 0))
             limit = int(headers.get("X-RateLimit-Limit", 5000))
+
+            if remaining < 0 or reset_ts == 0:
+                return
 
             self.rate_limit = RateLimitInfo(
                 remaining=remaining,
@@ -159,6 +162,8 @@ class GitHubGraphQLValidator:
                     elif response.status == 403:
                         if self.rate_limit and self.rate_limit.remaining == 0:
                             raise RateLimitExceeded(self.rate_limit)
+                        error_text = await response.text()
+                        logger.warning(f"GitHub 403 (not rate limit): {error_text[:200]}")
                     elif response.status >= 500:
                         pass
                     else:
