@@ -50,7 +50,6 @@ def evaluate_promotion(
     signals = []
     evidence = {}
 
-    # Check arXiv signal
     if arxiv_result.matched:
         signals.append(f"arxiv_id_in_{arxiv_result.location}")
         evidence["arxiv_id_found"] = arxiv_result.found_id
@@ -58,7 +57,6 @@ def evaluate_promotion(
     elif arxiv_result.skipped:
         evidence["arxiv_skipped"] = arxiv_result.skip_reason
 
-    # Check name similarity signal
     if name_result.matched:
         signals.append("name_similarity")
     evidence["name_similarity_score"] = name_result.score
@@ -68,7 +66,6 @@ def evaluate_promotion(
     if name_result.skipped:
         evidence["name_skipped"] = name_result.skip_reason
 
-    # Check author matching signal
     if author_result.matched:
         signals.append("author_match")
         evidence["author_matches"] = [
@@ -141,17 +138,14 @@ class PromotionEngine:
         """
         promotable = []
         for record in records:
-            # Check validation status
             validation = record.get("_validation", {})
             if not validation.get("is_valid"):
                 continue
 
-            # Check URL is GitHub
             url = record.get("enrichedValue", {}).get("relatedIdentifier", "")
             if not parse_github_url(url):
                 continue
 
-            # Check for matching paper
             doi = record.get("doi", "")
             if doi:
                 normalized_doi = normalize_doi(doi)
@@ -186,21 +180,18 @@ class PromotionEngine:
         parsed = parse_github_url(url)
         repo_name = parsed[1] if parsed else None
 
-        # Run arXiv detection
         arxiv_result = detect_arxiv_id(
             paper_arxiv_id=paper.arxiv_id,
             readme_content=promotion_data.readme_content,
             description=promotion_data.description,
         )
 
-        # Run name similarity
         name_result = compute_name_similarity(
             repo_name=repo_name,
             paper_title=paper.title,
             threshold=self.name_similarity_threshold,
         )
 
-        # Run author matching
         contributors = [
             ContributorInfo(
                 login=c["login"],
@@ -216,7 +207,6 @@ class PromotionEngine:
             loaded_model=self._get_author_model(),
         )
 
-        # Evaluate promotion
         return evaluate_promotion(
             arxiv_result=arxiv_result,
             name_result=name_result,
@@ -240,24 +230,20 @@ class PromotionEngine:
         Returns:
             Updated records with _promotion field and updated relationType
         """
-        # Build paper index
         paper_index = self._build_paper_index(papers)
         logger.info(f"Built paper index with {len(paper_index)} entries")
 
-        # Filter to promotable records
         promotable = self._filter_promotable_records(records, paper_index)
         logger.info(f"Found {len(promotable)} promotable records out of {len(records)}")
 
         if not promotable:
             return records
 
-        # Extract unique GitHub URLs
         urls = list(set(
             r.get("enrichedValue", {}).get("relatedIdentifier", "")
             for r in promotable
         ))
 
-        # Fetch promotion data from GitHub
         fetcher = GitHubPromotionFetcher(token=self.github_token, batch_size=self.batch_size)
 
         def github_progress(completed, total):
@@ -266,17 +252,13 @@ class PromotionEngine:
 
         promotion_data_list = await fetcher.fetch_promotion_data(urls, progress_callback=github_progress)
 
-        # Build URL to data lookup
         url_to_data = {d.url: d for d in promotion_data_list}
-
-        # Evaluate each record
-        results = {}  # url -> PromotionResult (dedupe)
+        results = {}
         total_to_evaluate = len(promotable)
 
         for i, record in enumerate(promotable):
             url = record.get("enrichedValue", {}).get("relatedIdentifier", "")
 
-            # Skip if already evaluated (same URL)
             if url in results:
                 continue
 
@@ -297,7 +279,6 @@ class PromotionEngine:
             if progress_callback:
                 progress_callback("Evaluating heuristics", i + 1, total_to_evaluate)
 
-        # Apply results to all records
         output_records = []
         promoted_count = 0
 
@@ -306,11 +287,9 @@ class PromotionEngine:
             result = results.get(url)
 
             if result:
-                # Store original relation type
                 original_relation = record.get("enrichedValue", {}).get("relationType", "References")
                 result.original_relation = original_relation
 
-                # Add promotion metadata
                 record["_promotion"] = {
                     "promoted": result.promoted,
                     "original_relation": original_relation,
@@ -318,7 +297,6 @@ class PromotionEngine:
                     "evidence": result.evidence,
                 }
 
-                # Update relation type if promoted
                 if result.promoted:
                     record["enrichedValue"]["relationType"] = "isSupplementedBy"
                     promoted_count += 1

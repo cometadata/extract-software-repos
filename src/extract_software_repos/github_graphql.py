@@ -181,21 +181,17 @@ class GitHubPromotionFetcher:
                 results.append(GitHubPromotionData(url=url, fetch_error="not_found"))
                 continue
 
-            # Extract description
             description = repo_data.get("description")
 
-            # Extract README (try variants in order)
             readme_content = None
             for readme_key in ["readme_md", "readme_rst", "readme_txt", "readme_plain"]:
                 readme_obj = repo_data.get(readme_key)
                 if readme_obj and readme_obj.get("text"):
                     readme_content = readme_obj["text"]
-                    # Truncate very large READMEs (>1MB)
                     if len(readme_content) > 1_000_000:
                         readme_content = readme_content[:1_000_000]
                     break
 
-            # Extract contributors
             contributors = []
             users_data = repo_data.get("mentionableUsers", {})
             for user in users_data.get("nodes", []):

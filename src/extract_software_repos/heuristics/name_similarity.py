@@ -44,16 +44,10 @@ def normalize_text(text: str) -> Set[str]:
     Returns:
         Set of normalized tokens
     """
-    # Lowercase
     text = text.lower()
-
-    # Replace hyphens and underscores with spaces
     text = text.replace("-", " ").replace("_", " ")
-
-    # Remove punctuation
     text = text.translate(str.maketrans("", "", string.punctuation))
 
-    # Split and filter
     tokens = set(text.split())
     tokens = tokens - STOPWORDS
 
@@ -78,11 +72,9 @@ def compute_containment_score(repo_name: str, paper_title: str) -> float:
     if not repo_tokens or not title_tokens:
         return 0.0
 
-    # Check both directions
     repo_in_title = len(repo_tokens & title_tokens) / len(repo_tokens)
     title_in_repo = len(repo_tokens & title_tokens) / len(title_tokens)
 
-    # Return the better containment direction
     return max(repo_in_title, title_in_repo)
 
 
@@ -118,7 +110,6 @@ def compute_fuzzy_score(repo_name: str, paper_title: str) -> float:
     Returns:
         Score from 0 to 1
     """
-    # Join tokens back to strings for fuzzy comparison
     repo_normalized = " ".join(sorted(normalize_text(repo_name)))
     title_normalized = " ".join(sorted(normalize_text(paper_title)))
 
@@ -149,7 +140,6 @@ def compute_name_similarity(
     Returns:
         NameSimilarityResult with match status and scores
     """
-    # Check if we can run this heuristic
     if not repo_name:
         return NameSimilarityResult(
             matched=False,
@@ -164,12 +154,10 @@ def compute_name_similarity(
             skip_reason="no_paper_title",
         )
 
-    # Compute individual scores
     containment = compute_containment_score(repo_name, paper_title)
     overlap = compute_token_overlap_score(repo_name, paper_title)
     fuzzy = compute_fuzzy_score(repo_name, paper_title)
 
-    # Compute weighted final score
     final_score = (
         containment_weight * containment +
         overlap_weight * overlap +

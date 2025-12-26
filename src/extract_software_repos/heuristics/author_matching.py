@@ -143,7 +143,6 @@ def match_authors_to_contributors(
     Returns:
         AuthorMatchResult with match status and details
     """
-    # Check if we can run this heuristic
     if not contributors:
         return AuthorMatchResult(
             matched=False,
@@ -158,15 +157,13 @@ def match_authors_to_contributors(
             skip_reason="no_authors",
         )
 
-    # Load model if not provided
     if loaded_model is None:
         model = load_author_matching_model(device)
     else:
         model = loaded_model
 
-    # Create all contributor-author pairs
     inputs = []
-    pairs = []  # Track which pair each input corresponds to
+    pairs = []
 
     for contributor in contributors:
         for author in paper_authors:
@@ -179,11 +176,9 @@ def match_authors_to_contributors(
             inputs.append(text)
             pairs.append((contributor, author))
 
-    # Run inference
     logger.debug(f"Running author matching on {len(inputs)} pairs")
     outputs = model(inputs)
 
-    # Extract matches
     matches = []
     for (contributor, author), output in zip(pairs, outputs):
         if output["label"] == "match":

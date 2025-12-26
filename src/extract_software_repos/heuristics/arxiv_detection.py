@@ -9,7 +9,7 @@ from typing import Optional, Set
 class ArxivDetectionResult:
     """Result of arXiv ID detection."""
     matched: bool
-    location: Optional[str] = None  # "readme" or "description"
+    location: Optional[str] = None
     found_id: Optional[str] = None
     skipped: bool = False
     skip_reason: Optional[str] = None
@@ -45,22 +45,18 @@ def normalize_arxiv_id(arxiv_id: str) -> str:
     Returns:
         Normalized arXiv ID
     """
-    # Handle DOI format
     if arxiv_id.startswith("10.48550"):
         match = re.search(r'arXiv\.(\d{4}\.\d{4,5})', arxiv_id, re.IGNORECASE)
         if match:
             arxiv_id = match.group(1)
 
-    # Handle URL format
     if "arxiv.org" in arxiv_id.lower():
         match = re.search(r'abs/(\d{4}\.\d{4,5}|[a-z-]+/\d{7})', arxiv_id, re.IGNORECASE)
         if match:
             arxiv_id = match.group(1)
 
-    # Strip version suffix
     arxiv_id = VERSION_PATTERN.sub('', arxiv_id)
 
-    # Lowercase old-format categories
     if '/' in arxiv_id:
         arxiv_id = arxiv_id.lower()
 
@@ -102,7 +98,6 @@ def detect_arxiv_id(
     Returns:
         ArxivDetectionResult with match status and location
     """
-    # Check if we can run this heuristic
     if not paper_arxiv_id:
         return ArxivDetectionResult(
             matched=False,
@@ -117,10 +112,8 @@ def detect_arxiv_id(
             skip_reason="no_content",
         )
 
-    # Normalize the paper's arXiv ID
     normalized_paper_id = normalize_arxiv_id(paper_arxiv_id)
 
-    # Check README first (more likely to have detailed references)
     if readme_content:
         found_ids = extract_arxiv_ids_from_text(readme_content)
         if normalized_paper_id in found_ids:
@@ -130,7 +123,6 @@ def detect_arxiv_id(
                 found_id=normalized_paper_id,
             )
 
-    # Check description
     if description:
         found_ids = extract_arxiv_ids_from_text(description)
         if normalized_paper_id in found_ids:

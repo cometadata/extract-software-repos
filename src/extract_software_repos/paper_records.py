@@ -65,25 +65,20 @@ def extract_paper_info_datacite(record: Dict[str, Any]) -> PaperInfo:
     """
     attrs = record.get("attributes", {})
 
-    # DOI - prefer attributes.doi, fall back to id
     doi = attrs.get("doi") or record.get("id")
 
-    # Title - first title entry
     titles = attrs.get("titles", [])
     title = titles[0]["title"] if titles else None
 
-    # Authors - extract from creators, only Personal type
     authors = []
     for creator in attrs.get("creators", []):
         if creator.get("nameType") != "Personal":
             continue
 
-        # Prefer givenName + familyName
         if creator.get("givenName") and creator.get("familyName"):
             name = f"{creator['givenName']} {creator['familyName']}"
         else:
             name = creator.get("name", "")
-            # Handle "Last, First" format → "First Last"
             if ", " in name:
                 parts = name.split(", ", 1)
                 name = f"{parts[1]} {parts[0]}"
@@ -91,16 +86,13 @@ def extract_paper_info_datacite(record: Dict[str, Any]) -> PaperInfo:
         if name:
             authors.append(name)
 
-    # arXiv ID - check multiple locations
     arxiv_id = None
 
-    # Check alternateIdentifiers first
     for alt_id in attrs.get("alternateIdentifiers", []):
         if alt_id.get("alternateIdentifierType") == "arXiv":
             arxiv_id = alt_id.get("alternateIdentifier")
             break
 
-    # Fall back to identifiers
     if not arxiv_id:
         for ident in attrs.get("identifiers", []):
             if ident.get("identifierType") == "arXiv":
