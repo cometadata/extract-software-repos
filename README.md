@@ -68,7 +68,7 @@ Check if extracted URLs actually exist. Uses optimized validators:
 - **Package registries**: Async HTTP (PyPI, npm, CRAN, etc.)
 - **Other git hosts**: Parallel git ls-remote
 
-**Requires** `GITHUB_TOKEN` environment variable:
+**Requires** `GITHUB_TOKEN` environment variable (no scopes needed for public repos):
 
 ```bash
 export GITHUB_TOKEN=ghp_your_token_here
