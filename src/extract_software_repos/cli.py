@@ -209,14 +209,36 @@ def _extract_parquet(
 @click.option(
     "--workers", "-w",
     type=int,
-    default=10,
-    help="Number of parallel workers (default: 10)"
+    default=50,
+    help="Number of parallel workers for git ls-remote (default: 50)"
+)
+@click.option(
+    "--http-concurrency",
+    type=int,
+    default=100,
+    help="Max concurrent HTTP requests (default: 100)"
 )
 @click.option(
     "--timeout", "-t",
     type=int,
-    default=10,
-    help="Timeout per URL in seconds (default: 10)"
+    default=5,
+    help="Timeout per request in seconds (default: 5)"
+)
+@click.option(
+    "--checkpoint",
+    type=click.Path(path_type=Path),
+    default=Path("validation_cache.jsonl"),
+    help="Checkpoint file for resume (default: validation_cache.jsonl)"
+)
+@click.option(
+    "--ignore-checkpoint",
+    is_flag=True,
+    help="Start fresh, ignore existing checkpoint"
+)
+@click.option(
+    "--wait-for-ratelimit",
+    is_flag=True,
+    help="Wait when rate limited instead of exiting"
 )
 @click.option(
     "--keep-invalid",
@@ -233,7 +255,11 @@ def validate(
     input_file: Path,
     output: Optional[Path],
     workers: int,
+    http_concurrency: int,
     timeout: int,
+    checkpoint: Path,
+    ignore_checkpoint: bool,
+    wait_for_ratelimit: bool,
     keep_invalid: bool,
     log_level: str,
 ):
@@ -241,76 +267,117 @@ def validate(
 
     INPUT_FILE: Enrichment JSONL file to validate
 
-    Checks if URLs actually exist using git ls-remote for repositories
-    and API/HTTP checks for package registries.
+    Uses GitHub GraphQL API (batched) for GitHub URLs, async HTTP for
+    package registries, and git ls-remote for other git hosts.
+
+    Requires GITHUB_TOKEN environment variable for GitHub validation.
 
     Example:
+        export GITHUB_TOKEN=ghp_xxxx
         extract-software-repos validate enrichments.jsonl -o validated.jsonl
     """
+    import os
     from tqdm import tqdm
-    from .validation import validate_url, ValidationStats
+    from .fast_validation import FastValidator, deduplicate_urls
+    from .github_graphql import RateLimitExceeded
 
     _setup_logging(log_level)
 
     if output is None:
         output = input_file.parent / f"{input_file.stem}_validated.jsonl"
 
-    click.echo(f"Validating URLs from {input_file}")
-    click.echo(f"Workers: {workers}, Timeout: {timeout}s")
+    # Check for GitHub token
+    if not os.environ.get("GITHUB_TOKEN"):
+        click.echo("Warning: GITHUB_TOKEN not set. GitHub validation will fail.", err=True)
 
-    enrichments = []
+    # Handle checkpoint
+    if ignore_checkpoint and checkpoint.exists():
+        click.echo(f"Ignoring existing checkpoint: {checkpoint}")
+        checkpoint.unlink()
+
+    click.echo(f"Validating URLs from {input_file}")
+    click.echo(f"Checkpoint: {checkpoint}")
+    click.echo(f"Workers: {workers}, HTTP concurrency: {http_concurrency}, Timeout: {timeout}s")
+
+    # Load records
+    records = []
     for line in open(input_file, "r", encoding="utf-8"):
         line = line.strip()
         if line:
-            enrichments.append(json.loads(line))
+            records.append(json.loads(line))
 
-    click.echo(f"Loaded {len(enrichments):,} enrichments")
+    click.echo(f"Loaded {len(records):,} enrichment records")
 
-    stats = ValidationStats()
-    valid_enrichments = []
+    # Deduplicate for display
+    unique_urls, url_to_records = deduplicate_urls(records)
+    click.echo(f"Unique URLs: {len(unique_urls):,}")
 
-    def get_url_type(enrichment: dict) -> str:
-        url = enrichment.get("enrichedValue", {}).get("relatedIdentifier", "")
-        url_lower = url.lower()
-        if "github.com" in url_lower:
-            return "github"
-        elif "gitlab.com" in url_lower:
-            return "gitlab"
-        elif "bitbucket.org" in url_lower:
-            return "bitbucket"
-        elif "pypi.org" in url_lower:
-            return "pypi"
-        elif "npmjs.com" in url_lower:
-            return "npm"
-        elif "cran.r-project.org" in url_lower:
-            return "cran"
-        elif "bioconductor.org" in url_lower:
-            return "bioconductor"
+    # Set up validator
+    validator = FastValidator(
+        checkpoint_path=checkpoint,
+        workers=workers,
+        http_concurrency=http_concurrency,
+        timeout=timeout,
+        wait_for_ratelimit=wait_for_ratelimit,
+    )
+
+    # Progress bars for each stage
+    stages = {}
+
+    def progress_callback(stage: str, completed: int, total: int):
+        if stage not in stages:
+            stages[stage] = tqdm(total=total, desc=stage, unit="urls")
+        stages[stage].n = completed
+        stages[stage].refresh()
+
+    # Validate
+    try:
+        results = validator.validate_all(records, progress_callback)
+    except RateLimitExceeded as e:
+        click.echo(f"\nRate limit exceeded. Resets at {e.rate_limit.reset_at}", err=True)
+        click.echo(f"Progress saved to {checkpoint}. Re-run to continue.", err=True)
+        click.echo(f"Use --wait-for-ratelimit to auto-wait next time.", err=True)
+        raise SystemExit(1)
+    finally:
+        for pbar in stages.values():
+            pbar.close()
+
+    # Apply results to records
+    valid_count = 0
+    invalid_count = 0
+    output_records = []
+
+    for record in records:
+        url = record.get("enrichedValue", {}).get("relatedIdentifier")
+        if not url:
+            continue
+
+        result = results.get(url)
+        if not result:
+            continue
+
+        if result["valid"]:
+            valid_count += 1
         else:
-            return "unknown"
+            invalid_count += 1
 
-    for enrichment in tqdm(enrichments, desc="Validating"):
-        url = enrichment.get("enrichedValue", {}).get("relatedIdentifier", "")
-        url_type = get_url_type(enrichment)
-
-        result = validate_url(url, url_type, timeout)
-        stats.add_result(result)
-
-        if result.is_valid or keep_invalid:
-            enrichment["_validation"] = {
-                "is_valid": result.is_valid,
-                "method": result.method,
-                "error": result.error,
+        if result["valid"] or keep_invalid:
+            record["_validation"] = {
+                "is_valid": result["valid"],
+                "method": result["method"],
+                "error": result.get("error"),
             }
-            valid_enrichments.append(enrichment)
+            output_records.append(record)
 
+    # Write output
     with open(output, "w", encoding="utf-8") as f:
-        for enrichment in valid_enrichments:
-            f.write(json.dumps(enrichment, ensure_ascii=False) + "\n")
+        for record in output_records:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     click.echo(f"\nValidation complete!")
-    click.echo(stats.summary())
-    click.echo(f"Output: {output} ({len(valid_enrichments):,} enrichments)")
+    click.echo(f"  Valid URLs: {valid_count:,}")
+    click.echo(f"  Invalid URLs: {invalid_count:,}")
+    click.echo(f"  Output: {output} ({len(output_records):,} records)")
 
 
 @cli.command("heal-fulltext")

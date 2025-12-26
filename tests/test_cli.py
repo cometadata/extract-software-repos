@@ -89,6 +89,22 @@ class TestValidateCommand:
         assert result.exit_code == 0
         assert "Validate extracted URLs" in result.output
 
+    def test_checkpoint_option_exists(self, runner):
+        result = runner.invoke(cli, ["validate", "--help"])
+        assert "--checkpoint" in result.output
+
+    def test_wait_for_ratelimit_option_exists(self, runner):
+        result = runner.invoke(cli, ["validate", "--help"])
+        assert "--wait-for-ratelimit" in result.output
+
+    def test_ignore_checkpoint_option_exists(self, runner):
+        result = runner.invoke(cli, ["validate", "--help"])
+        assert "--ignore-checkpoint" in result.output
+
+    def test_http_concurrency_option_exists(self, runner):
+        result = runner.invoke(cli, ["validate", "--help"])
+        assert "--http-concurrency" in result.output
+
 
 class TestHealFulltextCommand:
     """Test heal-fulltext command."""
