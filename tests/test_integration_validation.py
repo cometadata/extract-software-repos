@@ -1,5 +1,5 @@
 # tests/test_integration_validation.py
-"""Integration tests for fast validation pipeline."""
+"""Integration tests for validation pipeline."""
 
 import json
 import pytest
@@ -35,7 +35,7 @@ def sample_enrichments(tmp_path):
     return input_file
 
 
-class TestFastValidationIntegration:
+class TestValidationIntegration:
     """Integration tests for the full validation pipeline."""
 
     @patch.dict("os.environ", {"GITHUB_TOKEN": "test_token"})
@@ -65,12 +65,12 @@ class TestFastValidationIntegration:
         output_file = tmp_path / "validated.jsonl"
         checkpoint_file = tmp_path / "cache.jsonl"
 
-        with patch("extract_software_repos.fast_validation.GitHubGraphQLValidator") as mock_gh:
+        with patch("extract_software_repos.validation.GitHubGraphQLValidator") as mock_gh:
             mock_gh.return_value.validate_urls = AsyncMock(return_value=[
                 MagicMock(url="https://github.com/pytorch/pytorch", valid=True, error=None)
             ])
 
-            with patch("extract_software_repos.fast_validation.AsyncHTTPValidator") as mock_http:
+            with patch("extract_software_repos.validation.AsyncHTTPValidator") as mock_http:
                 mock_http.return_value.validate_urls = AsyncMock(return_value=[
                     {"url": "https://pypi.org/project/requests", "valid": True, "method": "api_check", "error": None}
                 ])

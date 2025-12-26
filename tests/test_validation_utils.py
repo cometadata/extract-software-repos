@@ -1,8 +1,8 @@
-# tests/test_fast_validation.py
-"""Tests for fast validation orchestrator."""
+# tests/test_validation_utils.py
+"""Tests for validation utility functions."""
 
 
-from extract_software_repos.fast_validation import (
+from extract_software_repos.validation import (
     categorize_urls,
     deduplicate_urls,
 )

@@ -278,7 +278,7 @@ def validate(
     """
     import os
     from tqdm import tqdm
-    from .fast_validation import FastValidator, deduplicate_urls
+    from .validation import Validator, deduplicate_urls
     from .github_graphql import RateLimitExceeded
 
     _setup_logging(log_level)
@@ -313,7 +313,7 @@ def validate(
     click.echo(f"Unique URLs: {len(unique_urls):,}")
 
     # Set up validator
-    validator = FastValidator(
+    validator = Validator(
         checkpoint_path=checkpoint,
         workers=workers,
         http_concurrency=http_concurrency,
