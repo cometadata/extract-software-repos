@@ -1,9 +1,6 @@
 # tests/test_checkpoint.py
 """Tests for checkpoint/resume functionality."""
 
-import json
-import pytest
-from pathlib import Path
 
 from extract_software_repos.checkpoint import CheckpointManager
 

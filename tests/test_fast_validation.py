@@ -1,13 +1,10 @@
 # tests/test_fast_validation.py
 """Tests for fast validation orchestrator."""
 
-import pytest
-from pathlib import Path
 
 from extract_software_repos.fast_validation import (
     categorize_urls,
     deduplicate_urls,
-    FastValidator,
 )
 
 

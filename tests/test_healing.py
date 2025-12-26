@@ -1,6 +1,5 @@
 """Tests for markdown healing module."""
 
-import pytest
 
 
 class TestUrlProtection:

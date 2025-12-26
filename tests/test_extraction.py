@@ -1,6 +1,5 @@
 """Tests for DataCite URL extraction."""
 
-import pytest
 
 from extract_software_repos.extraction import (
     extract_software_urls,

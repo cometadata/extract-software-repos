@@ -3,12 +3,10 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from aiohttp import ClientResponseError
 
 from extract_software_repos.async_validators import (
     AsyncHTTPValidator,
     validate_pypi_async,
-    validate_npm_async,
 )
 
 

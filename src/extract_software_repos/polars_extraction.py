@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Optional, Union
 
 import polars as pl
 

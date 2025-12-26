@@ -1,7 +1,6 @@
 # tests/test_validation.py
 """Tests for URL validation."""
 
-import pytest
 from unittest.mock import patch, MagicMock
 
 from extract_software_repos.validation import (

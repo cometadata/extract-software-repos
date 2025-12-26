@@ -137,7 +137,7 @@ def _extract_datacite(input_file: Path, output: Path):
             if total_records % 10000 == 0:
                 click.echo(f"  Processed {total_records:,} records, {total_enrichments:,} enrichments...")
 
-    click.echo(f"\nExtraction complete!")
+    click.echo("\nExtraction complete!")
     click.echo(f"  Records processed: {total_records:,}")
     click.echo(f"  Enrichments created: {total_enrichments:,}")
     click.echo(f"  Output: {output}")
@@ -183,7 +183,7 @@ def _extract_parquet(
 
     pbar.close()
 
-    click.echo(f"\nExtraction complete!")
+    click.echo("\nExtraction complete!")
     click.echo(f"  Total documents: {stats['total_papers']:,}")
     click.echo(f"  With URLs: {stats['papers_with_urls']:,}")
     click.echo(f"  Total enrichments: {stats['total_urls']:,}")
@@ -192,7 +192,7 @@ def _extract_parquet(
         click.echo(f"  Healing warnings: {stats['healing_warnings']:,} documents")
 
     if stats["urls_by_type"]:
-        click.echo(f"  By type:")
+        click.echo("  By type:")
         for url_type, count in sorted(stats["urls_by_type"].items(), key=lambda x: -x[1]):
             click.echo(f"    {url_type}: {count:,}")
 
@@ -336,7 +336,7 @@ def validate(
     except RateLimitExceeded as e:
         click.echo(f"\nRate limit exceeded. Resets at {e.rate_limit.reset_at}", err=True)
         click.echo(f"Progress saved to {checkpoint}. Re-run to continue.", err=True)
-        click.echo(f"Use --wait-for-ratelimit to auto-wait next time.", err=True)
+        click.echo("Use --wait-for-ratelimit to auto-wait next time.", err=True)
         raise SystemExit(1)
     finally:
         for pbar in stages.values():
@@ -374,7 +374,7 @@ def validate(
         for record in output_records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    click.echo(f"\nValidation complete!")
+    click.echo("\nValidation complete!")
     click.echo(f"  Valid URLs: {valid_count:,}")
     click.echo(f"  Invalid URLs: {invalid_count:,}")
     click.echo(f"  Output: {output} ({len(output_records):,} records)")
@@ -470,7 +470,7 @@ def heal_text_cmd(
         chunk_size=chunk_size,
     )
 
-    click.echo(f"\nHealing complete!")
+    click.echo("\nHealing complete!")
     click.echo(f"  Total documents:     {stats['total']:,}")
     click.echo(f"  Successfully healed: {stats['healed']:,}")
     click.echo(f"  With warnings:       {stats['warnings']:,}")

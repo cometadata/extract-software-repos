@@ -1,13 +1,10 @@
 # tests/test_github_graphql.py
 """Tests for GitHub GraphQL batch validation."""
 
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 from extract_software_repos.github_graphql import (
     parse_github_url,
     build_graphql_query,
-    GitHubGraphQLValidator,
 )
 
 

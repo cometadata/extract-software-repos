@@ -1,7 +1,6 @@
 """Tests for Polars extraction functionality."""
 
 import polars as pl
-import pytest
 
 
 class TestPolarsExtraction:

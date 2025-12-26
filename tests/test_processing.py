@@ -1,8 +1,6 @@
 # tests/test_processing.py
 """Tests for record and fulltext processing."""
 
-import pytest
-from datetime import datetime
 
 from extract_software_repos.processing import (
     normalize_doi,
