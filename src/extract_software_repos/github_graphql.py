@@ -32,7 +32,6 @@ def parse_github_url(url: str) -> Optional[Tuple[str, str]]:
     owner = match.group(1)
     repo = match.group(2)
 
-    # Remove .git suffix if present
     if repo.endswith(".git"):
         repo = repo[:-4]
 
@@ -126,7 +125,6 @@ class GitHubGraphQLValidator:
         Returns:
             List of validation results
         """
-        # Parse URLs to (owner, repo) tuples
         url_to_repo: Dict[str, Tuple[str, str]] = {}
         results: List[GitHubValidationResult] = []
 
@@ -140,12 +138,10 @@ class GitHubGraphQLValidator:
         if not url_to_repo:
             return results
 
-        # Build query
         repos = list(url_to_repo.values())
         url_list = list(url_to_repo.keys())
         query = build_graphql_query(repos)
 
-        # Execute with retries
         for attempt in range(self.max_retries):
             try:
                 async with session.post(
@@ -161,25 +157,20 @@ class GitHubGraphQLValidator:
                     elif response.status == 401:
                         raise ValueError("Invalid GitHub token")
                     elif response.status == 403:
-                        # Rate limited
                         if self.rate_limit and self.rate_limit.remaining == 0:
                             raise RateLimitExceeded(self.rate_limit)
-                        # Other 403 - retry
                     elif response.status >= 500:
-                        # Server error - retry
                         pass
                     else:
                         error_text = await response.text()
                         logger.warning(f"GitHub API error {response.status}: {error_text}")
 
-                # Exponential backoff
                 await asyncio.sleep(2 ** attempt)
 
             except aiohttp.ClientError as e:
                 logger.warning(f"Network error on attempt {attempt + 1}: {e}")
                 await asyncio.sleep(2 ** attempt)
 
-        # All retries failed
         for url in url_list:
             results.append(GitHubValidationResult(url=url, valid=False, error="request_failed"))
 
@@ -208,10 +199,8 @@ class GitHubGraphQLValidator:
             repo_data = response_data.get(repo_key)
 
             if repo_data is not None:
-                # Repo exists
                 results.append(GitHubValidationResult(url=url, valid=True))
             else:
-                # Repo doesn't exist or error
                 error_type = error_lookup.get(repo_key, "not_found")
                 results.append(GitHubValidationResult(url=url, valid=False, error=error_type))
 

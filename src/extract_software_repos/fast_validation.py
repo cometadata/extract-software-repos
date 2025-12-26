@@ -115,8 +115,6 @@ class FastValidator:
         self.http_concurrency = http_concurrency
         self.timeout = timeout
         self.wait_for_ratelimit = wait_for_ratelimit
-
-        # Results accumulator
         self.results: Dict[str, Dict[str, Any]] = {}
 
     def validate_all(
@@ -133,33 +131,26 @@ class FastValidator:
         Returns:
             Dict mapping URL to validation result
         """
-        # Step 1: Deduplicate
         unique_urls, url_to_records = deduplicate_urls(records)
         logger.info(f"Deduplicated: {len(records)} records -> {len(unique_urls)} unique URLs")
 
-        # Step 2: Filter out already-cached URLs
         cached = self.checkpoint.get_cached_urls()
         urls_to_validate = [u for u in unique_urls if u not in cached]
         logger.info(f"After cache filter: {len(urls_to_validate)} URLs to validate")
 
-        # Copy cached results
         self.results = {url: cached[url] for url in unique_urls if url in cached}
 
         if not urls_to_validate:
             return self.results
 
-        # Step 3: Categorize URLs
         categories = categorize_urls(urls_to_validate)
 
-        # Step 4: Validate each category
-        # GitHub (GraphQL batched)
         if categories["github"]:
             self._validate_github(
                 categories["github"],
                 lambda c, t: progress_callback("GitHub", c, t) if progress_callback else None,
             )
 
-        # Other git hosts (threaded git ls-remote)
         git_urls = categories["gitlab"] + categories["bitbucket"] + categories["codeberg"]
         if git_urls:
             self._validate_git_repos(
@@ -167,7 +158,6 @@ class FastValidator:
                 lambda c, t: progress_callback("Git repos", c, t) if progress_callback else None,
             )
 
-        # HTTP-based validators (async)
         http_urls = []
         for url_type in ["pypi", "npm", "cran", "bioconductor", "zenodo", "figshare", "codeocean", "software_heritage"]:
             for url in categories[url_type]:
@@ -191,7 +181,6 @@ class FastValidator:
             validator = GitHubGraphQLValidator()
         except ValueError as e:
             logger.error(f"GitHub validation skipped: {e}")
-            # Mark all as failed due to missing token
             for url in urls:
                 result = {"url": url, "valid": False, "method": "graphql", "error": "no_token"}
                 self.results[url] = result
@@ -208,7 +197,6 @@ class FastValidator:
 
         except RateLimitExceeded as e:
             if self.wait_for_ratelimit:
-                # Wait and retry
                 wait_seconds = (e.rate_limit.reset_at - e.rate_limit.reset_at).total_seconds()
                 logger.info(f"Rate limit exceeded. Waiting {wait_seconds:.0f}s...")
                 import time
