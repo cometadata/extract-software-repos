@@ -1,7 +1,11 @@
 """Paper record extraction for different metadata formats."""
 
+import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from pathlib import Path
+from typing import Dict, List, Optional, Any, Set
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -131,3 +135,61 @@ def extract_paper_info(record: Dict[str, Any], record_type: str = "datacite") ->
         raise ValueError(f"Unknown record type: {record_type}. Known types: {list(RECORD_EXTRACTORS.keys())}")
 
     return extractor(record)
+
+
+def load_papers_for_dois(
+    records_path: Path,
+    dois_needed: Set[str],
+    record_type: str = "datacite",
+) -> List[PaperInfo]:
+    """Load paper records matching specific DOIs using DuckDB.
+
+    Uses DuckDB to efficiently query large JSONL/JSONL.gz files,
+    loading only records that match the requested DOIs.
+
+    Args:
+        records_path: Path to JSONL or JSONL.gz file
+        dois_needed: Set of normalized DOIs to load
+        record_type: Record format type
+
+    Returns:
+        List of PaperInfo for matching DOIs
+    """
+    import duckdb
+
+    if not dois_needed:
+        return []
+
+    logger.info(f"Loading papers for {len(dois_needed):,} DOIs from {records_path}")
+
+    dois_list = list(dois_needed)
+
+    if record_type == "datacite":
+        query = """
+            SELECT *
+            FROM read_json_auto(?, maximum_object_size=104857600, ignore_errors=true)
+            WHERE LOWER(COALESCE(attributes.doi, id)) IN (SELECT UNNEST(?::VARCHAR[]))
+        """
+    else:
+        raise ValueError(f"Unknown record type: {record_type}")
+
+    conn = duckdb.connect(":memory:")
+
+    try:
+        result = conn.execute(query, [str(records_path), dois_list]).fetchall()
+        columns = [desc[0] for desc in conn.description]
+    finally:
+        conn.close()
+
+    logger.info(f"Found {len(result):,} matching paper records")
+
+    extractor = RECORD_EXTRACTORS.get(record_type)
+    if extractor is None:
+        raise ValueError(f"Unknown record type: {record_type}")
+
+    papers = []
+    for row in result:
+        record = dict(zip(columns, row))
+        papers.append(extractor(record))
+
+    return papers

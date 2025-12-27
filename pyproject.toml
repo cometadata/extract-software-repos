@@ -15,6 +15,7 @@ dependencies = [
     "transformers>=4.36",
     "torch>=2.0",
     "python-Levenshtein>=0.23",
+    "duckdb>=1.0",
 ]
 
 [project.optional-dependencies]
