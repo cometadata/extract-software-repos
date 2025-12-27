@@ -1,11 +1,9 @@
 """Tests for arXiv ID detection heuristic."""
 
-import pytest
 from extract_software_repos.heuristics.arxiv_detection import (
     detect_arxiv_id,
     normalize_arxiv_id,
     extract_arxiv_ids_from_text,
-    ArxivDetectionResult,
 )
 
 

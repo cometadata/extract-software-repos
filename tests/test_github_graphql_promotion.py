@@ -1,12 +1,11 @@
 """Tests for GitHub GraphQL promotion data fetching."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from extract_software_repos.github_graphql import (
     build_promotion_query,
     GitHubPromotionData,
     GitHubPromotionFetcher,
-    parse_github_url,
 )
 
 

@@ -2,7 +2,6 @@
 
 import pytest
 from extract_software_repos.paper_records import (
-    PaperInfo,
     extract_paper_info_datacite,
     extract_paper_info,
     normalize_doi,

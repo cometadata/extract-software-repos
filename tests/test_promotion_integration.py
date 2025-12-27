@@ -1,6 +1,5 @@
 """Integration tests for the promotion pipeline."""
 
-import json
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 

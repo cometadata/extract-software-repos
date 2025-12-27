@@ -1,9 +1,6 @@
 """Tests for promotion engine."""
 
-import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
 from extract_software_repos.promotion import (
-    PromotionResult,
     evaluate_promotion,
     PromotionEngine,
 )

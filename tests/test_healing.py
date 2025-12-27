@@ -1,5 +1,8 @@
 """Tests for markdown healing module."""
 
+import tempfile
+from pathlib import Path
+import polars as pl
 
 
 class TestUrlProtection:
@@ -207,11 +210,6 @@ class TestHealText:
         result, warnings = heal_text("")
         assert result == ""
         assert len(warnings) > 0
-
-
-import tempfile
-from pathlib import Path
-import polars as pl
 
 
 class TestParallelHealing:

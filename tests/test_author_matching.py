@@ -1,14 +1,10 @@
 """Tests for author matching heuristic."""
 
-import pytest
 from unittest.mock import MagicMock, patch
 from extract_software_repos.heuristics.author_matching import (
     ContributorInfo,
-    AuthorMatchResult,
-    AuthorMatchDetail,
     format_matching_input,
     match_authors_to_contributors,
-    MODEL_INPUT_TEMPLATE,
 )
 
 

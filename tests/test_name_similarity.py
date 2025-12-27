@@ -1,13 +1,11 @@
 """Tests for name similarity heuristic."""
 
-import pytest
 from extract_software_repos.heuristics.name_similarity import (
     normalize_text,
     compute_containment_score,
     compute_token_overlap_score,
     compute_fuzzy_score,
     compute_name_similarity,
-    NameSimilarityResult,
 )
 
 
