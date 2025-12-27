@@ -34,6 +34,20 @@ class TestBuildPromotionQuery:
 class TestGitHubPromotionData:
     """Tests for promotion data structure."""
 
+    def test_promotion_data_has_exists_property(self):
+        """GitHubPromotionData should indicate existence based on fetch_error."""
+        # Successful fetch = exists
+        data = GitHubPromotionData(url="https://github.com/user/repo", description="test")
+        assert data.exists is True
+
+        # fetch_error = not_found means doesn't exist
+        data_not_found = GitHubPromotionData(url="https://github.com/user/repo", fetch_error="not_found")
+        assert data_not_found.exists is False
+
+        # Other fetch errors still mean doesn't exist (for validation purposes)
+        data_error = GitHubPromotionData(url="https://github.com/user/repo", fetch_error="request_failed")
+        assert data_error.exists is False
+
     def test_creation(self):
         data = GitHubPromotionData(
             url="https://github.com/owner/repo",

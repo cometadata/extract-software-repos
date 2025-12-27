@@ -84,6 +84,11 @@ class GitHubPromotionData:
     contributors: List[Dict[str, Any]] = field(default_factory=list)
     fetch_error: Optional[str] = None
 
+    @property
+    def exists(self) -> bool:
+        """Return True if the repository exists (no fetch error)."""
+        return self.fetch_error is None
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to JSON-serializable dict."""
         return {
