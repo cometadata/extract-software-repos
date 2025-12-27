@@ -84,6 +84,27 @@ class GitHubPromotionData:
     contributors: List[Dict[str, Any]] = field(default_factory=list)
     fetch_error: Optional[str] = None
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to JSON-serializable dict."""
+        return {
+            "url": self.url,
+            "description": self.description,
+            "readme_content": self.readme_content,
+            "contributors": self.contributors,
+            "fetch_error": self.fetch_error,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "GitHubPromotionData":
+        """Create from dict."""
+        return cls(
+            url=data["url"],
+            description=data.get("description"),
+            readme_content=data.get("readme_content"),
+            contributors=data.get("contributors", []),
+            fetch_error=data.get("fetch_error"),
+        )
+
 
 def build_promotion_query(repos: List[Tuple[str, str]]) -> str:
     """Build a GraphQL query for fetching promotion data.

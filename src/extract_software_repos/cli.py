@@ -515,6 +515,11 @@ def heal_text_cmd(
     help="GitHub API batch size (default: 50)"
 )
 @click.option(
+    "--github-cache",
+    type=click.Path(path_type=Path),
+    help="Cache file for GitHub data (saves/resumes fetching)"
+)
+@click.option(
     "--log-level",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
     default="INFO",
@@ -528,6 +533,7 @@ def promote_cmd(
     promotion_threshold: int,
     name_similarity_threshold: float,
     batch_size: int,
+    github_cache: Optional[Path],
     log_level: str,
 ):
     """Promote validated repo links to isSupplementedBy.
@@ -545,15 +551,15 @@ def promote_cmd(
     """
     import os
     from tqdm import tqdm
-    from .paper_records import extract_paper_info
+    from .paper_records import load_papers_for_dois, normalize_doi
     from .promotion import PromotionEngine
+    from .github_graphql import GitHubPromotionData
 
     _setup_logging(log_level)
 
     if output is None:
         output = input_file.parent / f"{input_file.stem}_promoted.jsonl"
 
-    # Check for GitHub token
     if not os.environ.get("GITHUB_TOKEN"):
         click.echo("Error: GITHUB_TOKEN not set", err=True)
         raise SystemExit(1)
@@ -562,17 +568,36 @@ def promote_cmd(
     click.echo(f"Paper records: {records}")
     click.echo(f"Output: {output}")
 
-    # Load enrichment records
     enrichment_records = list(_stream_jsonl(input_file))
     click.echo(f"Loaded {len(enrichment_records):,} enrichment records")
 
-    # Load paper records
-    paper_infos = []
-    for record in _stream_jsonl(records):
-        paper_infos.append(extract_paper_info(record, record_type))
-    click.echo(f"Loaded {len(paper_infos):,} paper records")
+    dois_needed = set()
+    for rec in enrichment_records:
+        doi = rec.get("doi", "")
+        if doi:
+            dois_needed.add(normalize_doi(doi))
+    click.echo(f"Unique DOIs to lookup: {len(dois_needed):,}")
 
-    # Run promotion
+    paper_infos = load_papers_for_dois(records, dois_needed, record_type)
+    click.echo(f"Loaded {len(paper_infos):,} matching paper records")
+
+    cached_github_data = {}
+    cache_file_handle = None
+
+    if github_cache:
+        if github_cache.exists():
+            for record in _stream_jsonl(github_cache):
+                data = GitHubPromotionData.from_dict(record)
+                cached_github_data[data.url] = data
+            click.echo(f"Loaded {len(cached_github_data):,} cached GitHub entries")
+        cache_file_handle = open(github_cache, "a", encoding="utf-8")
+
+    def save_to_cache(batch_results):
+        if cache_file_handle:
+            for data in batch_results:
+                cache_file_handle.write(json.dumps(data.to_dict(), ensure_ascii=False) + "\n")
+            cache_file_handle.flush()
+
     engine = PromotionEngine(
         promotion_threshold=promotion_threshold,
         name_similarity_threshold=name_similarity_threshold,
@@ -589,11 +614,17 @@ def promote_cmd(
 
     try:
         output_records = engine.promote_records_sync(
-            enrichment_records, paper_infos, progress_callback
+            enrichment_records,
+            paper_infos,
+            progress_callback,
+            cached_github_data=cached_github_data if cached_github_data else None,
+            github_data_callback=save_to_cache if github_cache else None,
         )
     finally:
         for pbar in stages.values():
             pbar.close()
+        if cache_file_handle:
+            cache_file_handle.close()
 
     # Write output
     with open(output, "w", encoding="utf-8") as f:

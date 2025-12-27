@@ -219,6 +219,8 @@ class PromotionEngine:
         records: List[Dict[str, Any]],
         papers: List[PaperInfo],
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
+        cached_github_data: Optional[Dict[str, GitHubPromotionData]] = None,
+        github_data_callback: Optional[Callable[[List[GitHubPromotionData]], None]] = None,
     ) -> List[Dict[str, Any]]:
         """Promote eligible records based on heuristics.
 
@@ -226,6 +228,8 @@ class PromotionEngine:
             records: Enrichment records (with _validation)
             papers: Paper info list
             progress_callback: Optional callback(stage, completed, total)
+            cached_github_data: Pre-fetched GitHub data (url -> data)
+            github_data_callback: Called with newly fetched data for caching
 
         Returns:
             Updated records with _promotion field and updated relationType
@@ -239,20 +243,36 @@ class PromotionEngine:
         if not promotable:
             return records
 
-        urls = list(set(
+        all_urls = list(set(
             r.get("enrichedValue", {}).get("relatedIdentifier", "")
             for r in promotable
         ))
 
-        fetcher = GitHubPromotionFetcher(token=self.github_token, batch_size=self.batch_size)
+        url_to_data = dict(cached_github_data) if cached_github_data else {}
+        urls_to_fetch = [u for u in all_urls if u not in url_to_data]
 
-        def github_progress(completed, total):
-            if progress_callback:
-                progress_callback("Fetching GitHub data", completed, total)
+        if urls_to_fetch:
+            logger.info(f"Fetching {len(urls_to_fetch)} URLs ({len(all_urls) - len(urls_to_fetch)} cached)")
+            fetcher = GitHubPromotionFetcher(token=self.github_token, batch_size=self.batch_size)
 
-        promotion_data_list = await fetcher.fetch_promotion_data(urls, progress_callback=github_progress)
+            def github_progress(completed, total):
+                if progress_callback:
+                    progress_callback("Fetching GitHub data", completed, total)
 
-        url_to_data = {d.url: d for d in promotion_data_list}
+            def batch_callback(batch_results):
+                if github_data_callback:
+                    github_data_callback(batch_results)
+
+            new_data = await fetcher.fetch_promotion_data(
+                urls_to_fetch,
+                progress_callback=github_progress,
+                batch_callback=batch_callback,
+            )
+            for d in new_data:
+                url_to_data[d.url] = d
+        else:
+            logger.info(f"All {len(all_urls)} URLs found in cache")
+
         results = {}
         total_to_evaluate = len(promotable)
 
@@ -311,6 +331,10 @@ class PromotionEngine:
         records: List[Dict[str, Any]],
         papers: List[PaperInfo],
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
+        cached_github_data: Optional[Dict[str, GitHubPromotionData]] = None,
+        github_data_callback: Optional[Callable[[List[GitHubPromotionData]], None]] = None,
     ) -> List[Dict[str, Any]]:
         """Synchronous wrapper for promote_records."""
-        return asyncio.run(self.promote_records(records, papers, progress_callback))
+        return asyncio.run(self.promote_records(
+            records, papers, progress_callback, cached_github_data, github_data_callback
+        ))
