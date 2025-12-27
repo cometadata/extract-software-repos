@@ -39,38 +39,24 @@ class TestValidationIntegration:
     """Integration tests for the full validation pipeline."""
 
     @patch.dict("os.environ", {"GITHUB_TOKEN": "test_token"})
-    @patch("extract_software_repos.github_graphql.aiohttp.ClientSession")
-    @patch("extract_software_repos.async_validators.aiohttp.ClientSession")
     def test_validates_mixed_urls(
         self,
-        mock_async_session,
-        mock_github_session,
         sample_enrichments,
         tmp_path,
     ):
         """Test validation of mixed URL types."""
-        # Mock GitHub GraphQL response
-        mock_github_response = AsyncMock()
-        mock_github_response.status = 200
-        mock_github_response.json = AsyncMock(return_value={
-            "data": {"repo0": {"id": "123"}}
-        })
-        mock_github_response.headers = {"X-RateLimit-Remaining": "4999"}
-
-        # Mock PyPI response
-        mock_pypi_response = AsyncMock()
-        mock_pypi_response.status = 200
-
         runner = CliRunner()
         output_file = tmp_path / "validated.jsonl"
         checkpoint_file = tmp_path / "cache.jsonl"
 
-        with patch("extract_software_repos.validation.GitHubGraphQLValidator") as mock_gh:
+        # Patch at github_graphql module level since cli.py imports directly from there
+        with patch("extract_software_repos.github_graphql.GitHubGraphQLValidator") as mock_gh:
             mock_gh.return_value.validate_urls = AsyncMock(return_value=[
                 MagicMock(url="https://github.com/pytorch/pytorch", valid=True, error=None)
             ])
 
-            with patch("extract_software_repos.validation.AsyncHTTPValidator") as mock_http:
+            # Patch at async_validators module level
+            with patch("extract_software_repos.async_validators.AsyncHTTPValidator") as mock_http:
                 mock_http.return_value.validate_urls = AsyncMock(return_value=[
                     {"url": "https://pypi.org/project/requests", "valid": True, "method": "api_check", "error": None}
                 ])

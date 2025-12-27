@@ -322,10 +322,17 @@ def validate(
         export GITHUB_TOKEN=ghp_xxxx
         extract-software-repos validate enrichments.jsonl -o validated.jsonl
     """
+    import asyncio
     import os
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from datetime import datetime, timezone
+    from typing import Any, Dict
+
     from tqdm import tqdm
-    from .validation import Validator, deduplicate_urls
-    from .github_graphql import RateLimitExceeded
+    from .validation import deduplicate_urls, categorize_urls, validate_git_repo
+    from .async_validators import AsyncHTTPValidator
+    from .github_graphql import RateLimitExceeded, GitHubPromotionFetcher, GitHubPromotionData, GitHubGraphQLValidator
+    from .checkpoint import CheckpointManager
 
     _setup_logging(log_level)
 
@@ -349,6 +356,8 @@ def validate(
         checkpoint.unlink()
 
     click.echo(f"Validating URLs from {input_file}")
+    if promote:
+        click.echo(f"Promotion enabled with records from {records}")
     click.echo(f"Checkpoint: {checkpoint}")
     click.echo(f"Workers: {workers}, HTTP concurrency: {http_concurrency}, Timeout: {timeout}s")
 
@@ -361,20 +370,22 @@ def validate(
 
     click.echo(f"Loaded {len(input_records):,} enrichment records")
 
-    # Deduplicate for display
+    # Deduplicate URLs
     unique_urls, url_to_records = deduplicate_urls(input_records)
     click.echo(f"Unique URLs: {len(unique_urls):,}")
 
-    # Set up validator
-    validator = Validator(
-        checkpoint_path=checkpoint,
-        workers=workers,
-        http_concurrency=http_concurrency,
-        timeout=timeout,
-        wait_for_ratelimit=wait_for_ratelimit,
-    )
+    # Categorize URLs
+    categories = categorize_urls(unique_urls)
 
-    # Progress bars for each stage
+    # Set up checkpoint
+    checkpoint_mgr = CheckpointManager(checkpoint)
+    cached = checkpoint_mgr.get_cached_urls()
+
+    # Results storage
+    validation_results: Dict[str, Dict[str, Any]] = {}
+    github_promotion_data: Dict[str, GitHubPromotionData] = {}
+
+    # Progress bars
     stages = {}
 
     def progress_callback(stage: str, completed: int, total: int):
@@ -383,9 +394,164 @@ def validate(
         stages[stage].n = completed
         stages[stage].refresh()
 
-    # Validate
     try:
-        results = validator.validate_all(input_records, progress_callback)
+        # Handle GitHub URLs
+        github_urls = categories.get("github", [])
+        github_urls_to_process = [u for u in github_urls if u not in cached]
+
+        if github_urls_to_process:
+            if promote:
+                # Use promotion fetcher for combined validation + promotion data
+                click.echo("Fetching GitHub data (validation + promotion)...")
+
+                # Load cached GitHub promotion data if available
+                if github_cache and github_cache.exists():
+                    for record in _stream_jsonl(github_cache):
+                        data = GitHubPromotionData.from_dict(record)
+                        github_promotion_data[data.url] = data
+                    click.echo(f"Loaded {len(github_promotion_data):,} cached GitHub entries")
+
+                urls_to_fetch = [u for u in github_urls_to_process if u not in github_promotion_data]
+
+                if urls_to_fetch:
+                    cache_file_handle = None
+                    if github_cache:
+                        cache_file_handle = open(github_cache, "a", encoding="utf-8")
+
+                    def save_to_cache(batch_results):
+                        if cache_file_handle:
+                            for data in batch_results:
+                                cache_file_handle.write(json.dumps(data.to_dict(), ensure_ascii=False) + "\n")
+                            cache_file_handle.flush()
+
+                    try:
+                        fetcher = GitHubPromotionFetcher(batch_size=batch_size)
+
+                        async def fetch_all():
+                            return await fetcher.fetch_promotion_data(
+                                urls_to_fetch,
+                                progress_callback=lambda c, t: progress_callback("GitHub (validate+promote)", c, t),
+                                batch_callback=save_to_cache,
+                            )
+
+                        fetched_data = asyncio.run(fetch_all())
+
+                        for data in fetched_data:
+                            github_promotion_data[data.url] = data
+                            # Convert to validation result
+                            is_valid = data.exists
+                            result = {
+                                "url": data.url,
+                                "valid": is_valid,
+                                "method": "graphql_promotion",
+                                "error": data.fetch_error if not is_valid else None,
+                            }
+                            validation_results[data.url] = result
+                            checkpoint_mgr.save_result(data.url, is_valid, "graphql_promotion", data.fetch_error)
+
+                    finally:
+                        if cache_file_handle:
+                            cache_file_handle.close()
+
+                # Add cached GitHub promotion data as validation results
+                for url in github_urls:
+                    if url in cached:
+                        validation_results[url] = cached[url]
+                    elif url in github_promotion_data and url not in validation_results:
+                        data = github_promotion_data[url]
+                        is_valid = data.exists
+                        validation_results[url] = {
+                            "url": url,
+                            "valid": is_valid,
+                            "method": "graphql_promotion",
+                            "error": data.fetch_error if not is_valid else None,
+                        }
+
+            else:
+                # Standard GitHub validation (no promotion)
+                try:
+                    validator = GitHubGraphQLValidator()
+
+                    def save_batch(batch_results):
+                        for r in batch_results:
+                            result = {"url": r.url, "valid": r.valid, "method": "graphql", "error": r.error}
+                            validation_results[r.url] = result
+                            checkpoint_mgr.save_result(r.url, r.valid, "graphql", r.error)
+
+                    asyncio.run(validator.validate_urls(
+                        github_urls_to_process,
+                        lambda c, t: progress_callback("GitHub", c, t),
+                        save_batch,
+                    ))
+
+                except RateLimitExceeded as e:
+                    if wait_for_ratelimit:
+                        import time
+                        wait_seconds = (e.rate_limit.reset_at - datetime.now(timezone.utc)).total_seconds()
+                        click.echo(f"Rate limit exceeded. Waiting {wait_seconds:.0f}s...")
+                        time.sleep(max(0, wait_seconds) + 5)
+                        # Retry would go here
+                    else:
+                        raise
+
+        # Add cached GitHub results
+        for url in github_urls:
+            if url in cached and url not in validation_results:
+                validation_results[url] = cached[url]
+
+        # Handle non-GitHub git repos
+        git_urls = categories.get("gitlab", []) + categories.get("bitbucket", []) + categories.get("codeberg", [])
+        git_urls_to_process = [u for u in git_urls if u not in cached]
+
+        if git_urls_to_process:
+            total = len(git_urls_to_process)
+            completed = 0
+
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {executor.submit(validate_git_repo, url, timeout): url for url in git_urls_to_process}
+
+                for future in as_completed(futures):
+                    url = futures[future]
+                    is_valid, method, error = future.result()
+                    result = {"url": url, "valid": is_valid, "method": method, "error": error}
+                    validation_results[url] = result
+                    checkpoint_mgr.save_result(url, is_valid, method, error)
+                    completed += 1
+                    progress_callback("Git repos", completed, total)
+
+        # Add cached git results
+        for url in git_urls:
+            if url in cached and url not in validation_results:
+                validation_results[url] = cached[url]
+
+        # Handle HTTP-based URLs
+        http_urls = []
+        for url_type in ["pypi", "npm", "cran", "bioconductor", "zenodo", "figshare", "codeocean", "software_heritage"]:
+            for url in categories.get(url_type, []):
+                if url not in cached:
+                    http_urls.append({"url": url, "type": url_type})
+
+        if http_urls:
+            http_validator = AsyncHTTPValidator(max_concurrency=http_concurrency, timeout=timeout)
+
+            async def validate_http():
+                return await http_validator.validate_urls(
+                    http_urls,
+                    lambda c, t: progress_callback("HTTP", c, t),
+                )
+
+            http_results = asyncio.run(validate_http())
+
+            for r in http_results:
+                validation_results[r["url"]] = r
+            checkpoint_mgr.save_batch(http_results)
+
+        # Add cached HTTP results
+        for url_type in ["pypi", "npm", "cran", "bioconductor", "zenodo", "figshare", "codeocean", "software_heritage"]:
+            for url in categories.get(url_type, []):
+                if url in cached and url not in validation_results:
+                    validation_results[url] = cached[url]
+
     except RateLimitExceeded as e:
         click.echo(f"\nRate limit exceeded. Resets at {e.rate_limit.reset_at}", err=True)
         click.echo(f"Progress saved to {checkpoint}. Re-run to continue.", err=True)
@@ -395,7 +561,7 @@ def validate(
         for pbar in stages.values():
             pbar.close()
 
-    # Apply results to records
+    # Apply validation results to records
     valid_count = 0
     invalid_count = 0
     output_records = []
@@ -405,31 +571,117 @@ def validate(
         if not url:
             continue
 
-        result = results.get(url)
+        result = validation_results.get(url)
         if not result:
             continue
 
-        if result["valid"]:
+        if result.get("valid"):
             valid_count += 1
         else:
             invalid_count += 1
 
-        if result["valid"] or keep_invalid:
+        if result.get("valid") or keep_invalid:
             record["_validation"] = {
-                "is_valid": result["valid"],
-                "method": result["method"],
+                "is_valid": result.get("valid"),
+                "method": result.get("method"),
                 "error": result.get("error"),
             }
             output_records.append(record)
+
+    click.echo("\nValidation complete!")
+    click.echo(f"  Valid URLs: {valid_count:,}")
+    click.echo(f"  Invalid URLs: {invalid_count:,}")
+
+    # Run promotion if enabled
+    if promote:
+        from .paper_records import load_papers_for_dois, normalize_doi
+        from .promotion import PromotionEngine
+
+        click.echo("\nRunning promotion...")
+
+        # Get DOIs from valid records
+        dois_needed = set()
+        for rec in output_records:
+            if not rec.get("_validation", {}).get("is_valid"):
+                continue
+            doi = rec.get("doi", "")
+            if doi:
+                dois_needed.add(normalize_doi(doi))
+
+        click.echo(f"DOIs to lookup: {len(dois_needed):,}")
+
+        # Load paper records
+        paper_infos = load_papers_for_dois(records, dois_needed, record_type)
+        click.echo(f"Loaded {len(paper_infos):,} matching paper records")
+
+        # Build paper index
+        paper_index = {normalize_doi(p.doi): p for p in paper_infos if p.doi}
+
+        # Run promotion engine
+        engine = PromotionEngine(
+            promotion_threshold=promotion_threshold,
+            name_similarity_threshold=name_similarity_threshold,
+            batch_size=batch_size,
+        )
+
+        promoted_count = 0
+        for record in output_records:
+            if not record.get("_validation", {}).get("is_valid"):
+                continue
+
+            url = record.get("enrichedValue", {}).get("relatedIdentifier", "")
+
+            # Only promote GitHub URLs
+            if "github.com" not in url.lower():
+                continue
+
+            doi = record.get("doi", "")
+            if not doi:
+                continue
+
+            normalized_doi = normalize_doi(doi)
+            paper = paper_index.get(normalized_doi)
+            promotion_data = github_promotion_data.get(url)
+
+            if not paper:
+                record["_promotion"] = {
+                    "promoted": False,
+                    "skipped": True,
+                    "skip_reason": "no_paper_record",
+                }
+                continue
+
+            if not promotion_data or promotion_data.fetch_error:
+                record["_promotion"] = {
+                    "promoted": False,
+                    "skipped": True,
+                    "skip_reason": promotion_data.fetch_error if promotion_data else "no_promotion_data",
+                }
+                continue
+
+            # Evaluate promotion
+            result = engine._evaluate_record(record, paper, promotion_data)
+
+            original_relation = record.get("enrichedValue", {}).get("relationType", "References")
+
+            record["_promotion"] = {
+                "promoted": result.promoted,
+                "original_relation": original_relation,
+                "signals": result.signals,
+                "evidence": result.evidence,
+            }
+
+            if result.promoted:
+                record["enrichedValue"]["relationType"] = "isSupplementedBy"
+                promoted_count += 1
+
+        click.echo(f"  Promoted to isSupplementedBy: {promoted_count:,}")
 
     # Write output
     with open(output, "w", encoding="utf-8") as f:
         for record in output_records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    click.echo("\nValidation complete!")
-    click.echo(f"  Valid URLs: {valid_count:,}")
-    click.echo(f"  Invalid URLs: {invalid_count:,}")
     click.echo(f"  Output: {output} ({len(output_records):,} records)")
 
 
