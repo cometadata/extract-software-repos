@@ -9,8 +9,9 @@ Accuracy: 98.56% on original eval set
 """
 
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import torch
 from transformers import Pipeline, pipeline
@@ -243,3 +244,110 @@ def match_authors_to_contributors(
         matched=len(matches) > 0,
         matches=matches,
     )
+
+
+def batch_match_authors(
+    records_data: List[Dict[str, Any]],
+    model: Optional[Pipeline] = None,
+    max_contributors: int = DEFAULT_MAX_CONTRIBUTORS,
+    model_batch_size: int = 256,
+) -> Dict[tuple, AuthorMatchResult]:
+    """Batch author matching across multiple records.
+
+    Args:
+        records_data: List of dicts with keys:
+            - "key": (url, doi) tuple for result mapping
+            - "contributors": List[ContributorInfo]
+            - "authors": List[str] paper author names
+        model: Pre-loaded model pipeline
+        max_contributors: Max contributors per record (default: 20)
+        model_batch_size: Batch size for model inference (default: 256)
+
+    Returns:
+        Dict mapping (url, doi) -> AuthorMatchResult
+    """
+    if not records_data:
+        return {}
+
+    results = {}
+
+    # Handle records with no contributors
+    records_with_contributors = []
+    for record in records_data:
+        key = record["key"]
+        contributors = record["contributors"]
+        authors = record["authors"]
+
+        if not contributors:
+            results[key] = AuthorMatchResult(
+                matched=False,
+                skipped=True,
+                skip_reason="no_contributors",
+            )
+        elif not authors:
+            results[key] = AuthorMatchResult(
+                matched=False,
+                skipped=True,
+                skip_reason="no_authors",
+            )
+        else:
+            records_with_contributors.append(record)
+
+    if not records_with_contributors:
+        return results
+
+    if model is None:
+        # No model provided - mark all as skipped
+        for record in records_with_contributors:
+            results[record["key"]] = AuthorMatchResult(
+                matched=False,
+                skipped=True,
+                skip_reason="no_model",
+            )
+        return results
+
+    # Phase 1: Collect all model inputs with tracking
+    all_inputs = []
+    input_index = []  # (key, contributor_login, author_name)
+
+    for record in records_with_contributors:
+        key = record["key"]
+        contributors = record["contributors"][:max_contributors]
+        authors = record["authors"]
+
+        for contributor in contributors:
+            for author in authors:
+                text = format_matching_input(
+                    username=contributor.login,
+                    name=contributor.name,
+                    email=contributor.email,
+                    author_name=author,
+                )
+                all_inputs.append(text)
+                input_index.append((key, contributor.login, author))
+
+    # Phase 2: Batched model inference
+    outputs = model(all_inputs, batch_size=model_batch_size)
+
+    # Phase 3: Aggregate matches per key
+    matches_by_key = defaultdict(list)
+    for (key, login, author), output in zip(input_index, outputs):
+        if output["label"] == "match":
+            matches_by_key[key].append(
+                AuthorMatchDetail(
+                    contributor_login=login,
+                    author_name=author,
+                    confidence=output["score"],
+                )
+            )
+
+    # Phase 4: Build results
+    for record in records_with_contributors:
+        key = record["key"]
+        matches = matches_by_key.get(key, [])
+        results[key] = AuthorMatchResult(
+            matched=len(matches) > 0,
+            matches=matches,
+        )
+
+    return results

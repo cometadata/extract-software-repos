@@ -150,3 +150,58 @@ class TestMatchAuthorsToContributors:
         # Model loader should not be called when model is provided
         mock_load.assert_not_called()
         assert result.matched is True
+
+
+class TestBatchedAuthorMatching:
+    """Tests for batched author matching across multiple records."""
+
+    def test_batch_author_matching_single_record(self):
+        """Single record should work like regular matching."""
+        from extract_software_repos.heuristics.author_matching import (
+            batch_match_authors,
+            ContributorInfo,
+        )
+
+        records_data = [
+            {
+                "key": ("https://github.com/owner/repo", "10.1234/a"),
+                "contributors": [
+                    ContributorInfo(login="jsmith", name="John Smith", email="j@example.com"),
+                ],
+                "authors": ["John Smith"],
+            }
+        ]
+
+        # Use None for model to trigger skip (no model in unit test)
+        results = batch_match_authors(records_data, model=None)
+
+        assert ("https://github.com/owner/repo", "10.1234/a") in results
+        result = results[("https://github.com/owner/repo", "10.1234/a")]
+        assert result.skipped is True
+        assert result.skip_reason == "no_model"
+
+    def test_batch_author_matching_empty_input(self):
+        """Empty input should return empty results."""
+        from extract_software_repos.heuristics.author_matching import batch_match_authors
+
+        results = batch_match_authors([], model=None)
+        assert results == {}
+
+    def test_batch_author_matching_no_contributors(self):
+        """Records with no contributors should be skipped."""
+        from extract_software_repos.heuristics.author_matching import (
+            batch_match_authors,
+        )
+
+        records_data = [
+            {
+                "key": ("https://github.com/owner/repo", "10.1234/a"),
+                "contributors": [],
+                "authors": ["John Smith"],
+            }
+        ]
+
+        results = batch_match_authors(records_data, model=None)
+        result = results[("https://github.com/owner/repo", "10.1234/a")]
+        assert result.skipped is True
+        assert result.skip_reason == "no_contributors"
