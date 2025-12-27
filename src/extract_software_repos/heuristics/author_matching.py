@@ -75,11 +75,12 @@ def find_device() -> str:
     return "cpu"
 
 
-def load_author_matching_model(device: Optional[str] = None) -> Pipeline:
+def load_author_matching_model(device: Optional[str] = None, batch_size: int = 32) -> Pipeline:
     """Load the author matching model from HuggingFace.
 
     Args:
         device: Device to use (auto-detected if None)
+        batch_size: Batch size for inference (default: 32)
 
     Returns:
         HuggingFace text-classification pipeline
@@ -87,12 +88,13 @@ def load_author_matching_model(device: Optional[str] = None) -> Pipeline:
     if device is None:
         device = find_device()
 
-    logger.info(f"Loading author matching model on {device}")
+    logger.info(f"Loading author matching model on {device} with batch_size={batch_size}")
 
     return pipeline(
         "text-classification",
         model=AUTHOR_MATCHING_MODEL,
         device=device,
+        batch_size=batch_size,
     )
 
 
@@ -123,11 +125,17 @@ def format_matching_input(
     )
 
 
+# Default limit for contributors to check (most relevant are usually first)
+DEFAULT_MAX_CONTRIBUTORS = 20
+
+
 def match_authors_to_contributors(
     contributors: List[ContributorInfo],
     paper_authors: List[str],
     loaded_model: Optional[Pipeline] = None,
     device: Optional[str] = None,
+    max_contributors: int = DEFAULT_MAX_CONTRIBUTORS,
+    early_exit: bool = True,
 ) -> AuthorMatchResult:
     """Match paper authors to repository contributors.
 
@@ -139,6 +147,8 @@ def match_authors_to_contributors(
         paper_authors: List of paper author names
         loaded_model: Pre-loaded model pipeline (for efficiency)
         device: Device to use if loading model
+        max_contributors: Maximum contributors to check (default: 20)
+        early_exit: Stop after finding first match (default: True)
 
     Returns:
         AuthorMatchResult with match status and details
@@ -162,10 +172,17 @@ def match_authors_to_contributors(
     else:
         model = loaded_model
 
+    # Limit contributors to reduce inference time
+    # Core maintainers (most likely to be authors) are typically listed first
+    limited_contributors = contributors[:max_contributors]
+
+    if len(contributors) > max_contributors:
+        logger.debug(f"Limiting contributors from {len(contributors)} to {max_contributors}")
+
     inputs = []
     pairs = []
 
-    for contributor in contributors:
+    for contributor in limited_contributors:
         for author in paper_authors:
             text = format_matching_input(
                 username=contributor.login,
@@ -177,6 +194,40 @@ def match_authors_to_contributors(
             pairs.append((contributor, author))
 
     logger.debug(f"Running author matching on {len(inputs)} pairs")
+
+    # For early exit, process in smaller batches
+    if early_exit and len(inputs) > 0:
+        matches = []
+        batch_size = 32
+
+        for batch_start in range(0, len(inputs), batch_size):
+            batch_end = min(batch_start + batch_size, len(inputs))
+            batch_inputs = inputs[batch_start:batch_end]
+            batch_pairs = pairs[batch_start:batch_end]
+
+            outputs = model(batch_inputs)
+
+            for (contributor, author), output in zip(batch_pairs, outputs):
+                if output["label"] == "match":
+                    matches.append(AuthorMatchDetail(
+                        contributor_login=contributor.login,
+                        author_name=author,
+                        confidence=output["score"],
+                    ))
+                    # Early exit: we only need one match for the signal
+                    if early_exit:
+                        logger.debug(f"Early exit: found match {contributor.login} <-> {author}")
+                        return AuthorMatchResult(
+                            matched=True,
+                            matches=matches,
+                        )
+
+        return AuthorMatchResult(
+            matched=len(matches) > 0,
+            matches=matches,
+        )
+
+    # Non-early-exit path: process all at once
     outputs = model(inputs)
 
     matches = []
