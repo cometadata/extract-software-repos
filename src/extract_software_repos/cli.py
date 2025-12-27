@@ -334,7 +334,10 @@ def validate(
         raise click.UsageError("--promote requires --records")
 
     if output is None:
-        output = input_file.parent / f"{input_file.stem}_validated.jsonl"
+        if promote:
+            output = input_file.parent / f"{input_file.stem}_validated_promoted.jsonl"
+        else:
+            output = input_file.parent / f"{input_file.stem}_validated.jsonl"
 
     # Check for GitHub token
     if not os.environ.get("GITHUB_TOKEN"):
