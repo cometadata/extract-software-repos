@@ -85,6 +85,25 @@ extract-software-repos validate enrichments.jsonl -o validated.jsonl
 - `--wait-for-ratelimit` - Auto-wait when GitHub rate limited (up to 1 hour)
 - `--keep-invalid` - Include invalid URLs in output (marked as invalid)
 
+**Combined Validation + Promotion:**
+
+You can run validation and promotion in a single step, which uses a single GitHub API call:
+
+```bash
+extract-software-repos validate enrichments.jsonl \
+  --promote \
+  --records /path/to/records.jsonl.gz \
+  --github-cache cache.jsonl \
+  -o validated_promoted.jsonl
+```
+
+**Promotion Options (when using --promote):**
+- `--records PATH` - Paper records file (required with --promote)
+- `--record-type` - Record format: `datacite` (default)
+- `--promotion-threshold INT` - Signals required (default: 2)
+- `--name-similarity-threshold FLOAT` - Name match threshold (default: 0.45)
+- `--batch-size INT` - GitHub API batch size (default: 50)
+- `--github-cache PATH` - Cache file for GitHub data (saves/resumes fetching)
 
 **Resume:** If interrupted, re-run the same command. Cached URLs are skipped.
 
@@ -147,17 +166,21 @@ One record is output per URL found.
 # 1. Extract URLs from full-text (with healing for better extraction)
 extract-software-repos extract papers.parquet -o enrichments.jsonl --heal-fulltext
 
-# 2. Validate URLs exist
-extract-software-repos validate enrichments.jsonl -o enrichments_valid.jsonl
-
-# 3. Promote implementation repos to isSupplementedBy
-extract-software-repos promote enrichments_valid.jsonl \
+# 2. Validate + promote in one step (recommended)
+extract-software-repos validate enrichments.jsonl \
+  --promote \
   --records records.jsonl.gz \
   --github-cache github_cache.jsonl \
-  -o enrichments_promoted.jsonl
+  -o enrichments_final.jsonl
 
-# 4. Use with datacite-enrichment to merge into records
-datacite-enrich merge records.jsonl.gz enrichments_promoted.jsonl -o merged.jsonl
+# Or run separately:
+# 2a. Validate URLs exist
+# extract-software-repos validate enrichments.jsonl -o enrichments_valid.jsonl
+# 2b. Promote implementation repos
+# extract-software-repos promote enrichments_valid.jsonl --records records.jsonl.gz -o enrichments_final.jsonl
+
+# 3. Use with datacite-enrichment to merge into records
+datacite-enrich merge records.jsonl.gz enrichments_final.jsonl -o merged.jsonl
 ```
 
 ## Development
