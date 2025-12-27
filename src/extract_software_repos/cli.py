@@ -625,55 +625,57 @@ def validate(
         )
 
         promoted_count = 0
-        for record in output_records:
-            if not record.get("_validation", {}).get("is_valid"):
-                continue
+        with tqdm(output_records, desc="Evaluating promotion", unit="records") as pbar:
+            for record in pbar:
+                if not record.get("_validation", {}).get("is_valid"):
+                    continue
 
-            url = record.get("enrichedValue", {}).get("relatedIdentifier", "")
+                url = record.get("enrichedValue", {}).get("relatedIdentifier", "")
 
-            # Only promote GitHub URLs
-            if "github.com" not in url.lower():
-                continue
+                # Only promote GitHub URLs
+                if "github.com" not in url.lower():
+                    continue
 
-            doi = record.get("doi", "")
-            if not doi:
-                continue
+                doi = record.get("doi", "")
+                if not doi:
+                    continue
 
-            normalized_doi = normalize_doi(doi)
-            paper = paper_index.get(normalized_doi)
-            promotion_data = github_promotion_data.get(url)
+                normalized_doi = normalize_doi(doi)
+                paper = paper_index.get(normalized_doi)
+                promotion_data = github_promotion_data.get(url)
 
-            if not paper:
+                if not paper:
+                    record["_promotion"] = {
+                        "promoted": False,
+                        "skipped": True,
+                        "skip_reason": "no_paper_record",
+                    }
+                    continue
+
+                if not promotion_data or promotion_data.fetch_error:
+                    record["_promotion"] = {
+                        "promoted": False,
+                        "skipped": True,
+                        "skip_reason": promotion_data.fetch_error if promotion_data else "no_promotion_data",
+                    }
+                    continue
+
+                # Evaluate promotion
+                result = engine._evaluate_record(record, paper, promotion_data)
+
+                original_relation = record.get("enrichedValue", {}).get("relationType", "References")
+
                 record["_promotion"] = {
-                    "promoted": False,
-                    "skipped": True,
-                    "skip_reason": "no_paper_record",
+                    "promoted": result.promoted,
+                    "original_relation": original_relation,
+                    "signals": result.signals,
+                    "evidence": result.evidence,
                 }
-                continue
 
-            if not promotion_data or promotion_data.fetch_error:
-                record["_promotion"] = {
-                    "promoted": False,
-                    "skipped": True,
-                    "skip_reason": promotion_data.fetch_error if promotion_data else "no_promotion_data",
-                }
-                continue
-
-            # Evaluate promotion
-            result = engine._evaluate_record(record, paper, promotion_data)
-
-            original_relation = record.get("enrichedValue", {}).get("relationType", "References")
-
-            record["_promotion"] = {
-                "promoted": result.promoted,
-                "original_relation": original_relation,
-                "signals": result.signals,
-                "evidence": result.evidence,
-            }
-
-            if result.promoted:
-                record["enrichedValue"]["relationType"] = "isSupplementedBy"
-                promoted_count += 1
+                if result.promoted:
+                    record["enrichedValue"]["relationType"] = "isSupplementedBy"
+                    promoted_count += 1
+                    pbar.set_postfix(promoted=promoted_count)
 
         click.echo(f"  Promoted to isSupplementedBy: {promoted_count:,}")
 
