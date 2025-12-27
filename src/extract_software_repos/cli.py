@@ -625,66 +625,57 @@ def validate(
         )
 
         promoted_count = 0
-        with tqdm(output_records, desc="Evaluating promotion", unit="records") as pbar:
-            for record in pbar:
-                if not record.get("_validation", {}).get("is_valid"):
-                    continue
+        with open(output, "w", encoding="utf-8") as f:
+            with tqdm(output_records, desc="Evaluating promotion", unit="records") as pbar:
+                for record in pbar:
+                    is_valid = record.get("_validation", {}).get("is_valid")
+                    url = record.get("enrichedValue", {}).get("relatedIdentifier", "")
+                    is_github = "github.com" in url.lower() if url else False
+                    doi = record.get("doi", "")
 
-                url = record.get("enrichedValue", {}).get("relatedIdentifier", "")
+                    if is_valid and is_github and doi:
+                        normalized_doi = normalize_doi(doi)
+                        paper = paper_index.get(normalized_doi)
+                        promotion_data = github_promotion_data.get(url)
 
-                # Only promote GitHub URLs
-                if "github.com" not in url.lower():
-                    continue
+                        if not paper:
+                            record["_promotion"] = {
+                                "promoted": False,
+                                "skipped": True,
+                                "skip_reason": "no_paper_record",
+                            }
+                        elif not promotion_data or promotion_data.fetch_error:
+                            record["_promotion"] = {
+                                "promoted": False,
+                                "skipped": True,
+                                "skip_reason": promotion_data.fetch_error if promotion_data else "no_promotion_data",
+                            }
+                        else:
+                            result = engine._evaluate_record(record, paper, promotion_data)
+                            original_relation = record.get("enrichedValue", {}).get("relationType", "References")
 
-                doi = record.get("doi", "")
-                if not doi:
-                    continue
+                            record["_promotion"] = {
+                                "promoted": result.promoted,
+                                "original_relation": original_relation,
+                                "signals": result.signals,
+                                "evidence": result.evidence,
+                            }
 
-                normalized_doi = normalize_doi(doi)
-                paper = paper_index.get(normalized_doi)
-                promotion_data = github_promotion_data.get(url)
+                            if result.promoted:
+                                record["enrichedValue"]["relationType"] = "isSupplementedBy"
+                                promoted_count += 1
+                                pbar.set_postfix(promoted=promoted_count)
 
-                if not paper:
-                    record["_promotion"] = {
-                        "promoted": False,
-                        "skipped": True,
-                        "skip_reason": "no_paper_record",
-                    }
-                    continue
-
-                if not promotion_data or promotion_data.fetch_error:
-                    record["_promotion"] = {
-                        "promoted": False,
-                        "skipped": True,
-                        "skip_reason": promotion_data.fetch_error if promotion_data else "no_promotion_data",
-                    }
-                    continue
-
-                # Evaluate promotion
-                result = engine._evaluate_record(record, paper, promotion_data)
-
-                original_relation = record.get("enrichedValue", {}).get("relationType", "References")
-
-                record["_promotion"] = {
-                    "promoted": result.promoted,
-                    "original_relation": original_relation,
-                    "signals": result.signals,
-                    "evidence": result.evidence,
-                }
-
-                if result.promoted:
-                    record["enrichedValue"]["relationType"] = "isSupplementedBy"
-                    promoted_count += 1
-                    pbar.set_postfix(promoted=promoted_count)
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
         click.echo(f"  Promoted to isSupplementedBy: {promoted_count:,}")
+        click.echo(f"  Output: {output} ({len(output_records):,} records)")
 
-    # Write output
-    with open(output, "w", encoding="utf-8") as f:
-        for record in output_records:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-    click.echo(f"  Output: {output} ({len(output_records):,} records)")
+    else:
+        with open(output, "w", encoding="utf-8") as f:
+            for record in output_records:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        click.echo(f"  Output: {output} ({len(output_records):,} records)")
 
 
 @cli.command("heal-fulltext")
