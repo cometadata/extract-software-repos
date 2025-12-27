@@ -338,3 +338,63 @@ class PromotionEngine:
         return asyncio.run(self.promote_records(
             records, papers, progress_callback, cached_github_data, github_data_callback
         ))
+
+
+class BatchPromotionEngine:
+    """Engine for batched promotion evaluation across multiple records."""
+
+    def __init__(
+        self,
+        promotion_threshold: int = 2,
+        name_similarity_threshold: float = 0.45,
+        chunk_size: int = 1000,
+        model_batch_size: int = 256,
+    ):
+        self.promotion_threshold = promotion_threshold
+        self.name_similarity_threshold = name_similarity_threshold
+        self.chunk_size = chunk_size
+        self.model_batch_size = model_batch_size
+        self._author_model = None
+
+    def _get_author_model(self):
+        """Get or load the author matching model."""
+        if self._author_model is None:
+            self._author_model = load_author_matching_model()
+        return self._author_model
+
+    def _build_evidence(
+        self,
+        arxiv_result: ArxivDetectionResult,
+        name_result: NameSimilarityResult,
+        author_result: Optional[AuthorMatchResult],
+    ) -> Dict[str, Any]:
+        """Build evidence dict from heuristic results."""
+        evidence = {}
+
+        if arxiv_result.matched:
+            evidence["arxiv_id_found"] = arxiv_result.found_id
+            evidence["arxiv_id_location"] = arxiv_result.location
+        elif arxiv_result.skipped:
+            evidence["arxiv_skipped"] = arxiv_result.skip_reason
+
+        evidence["name_similarity_score"] = name_result.score
+        evidence["name_containment_score"] = name_result.containment_score
+        evidence["name_token_overlap_score"] = name_result.token_overlap_score
+        evidence["name_fuzzy_score"] = name_result.fuzzy_score
+        if name_result.skipped:
+            evidence["name_skipped"] = name_result.skip_reason
+
+        if author_result:
+            if author_result.matched:
+                evidence["author_matches"] = [
+                    {
+                        "contributor": m.contributor_login,
+                        "author": m.author_name,
+                        "confidence": m.confidence,
+                    }
+                    for m in author_result.matches
+                ]
+            elif author_result.skipped:
+                evidence["author_skipped"] = author_result.skip_reason
+
+        return evidence

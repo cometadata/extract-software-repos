@@ -130,3 +130,34 @@ class TestPromotionEngine:
         promotable = engine._filter_promotable_records(records, paper_index)
         assert len(promotable) == 1
         assert promotable[0]["doi"] == "10.1234/a"
+
+
+class TestBatchPromotionEngine:
+    """Tests for batched promotion engine."""
+
+    def test_init(self):
+        from extract_software_repos.promotion import BatchPromotionEngine
+
+        engine = BatchPromotionEngine(
+            promotion_threshold=2,
+            name_similarity_threshold=0.45,
+            chunk_size=1000,
+            model_batch_size=256,
+        )
+        assert engine.promotion_threshold == 2
+        assert engine.chunk_size == 1000
+
+    def test_build_evidence(self):
+        from extract_software_repos.promotion import BatchPromotionEngine
+
+        engine = BatchPromotionEngine()
+
+        arxiv = ArxivDetectionResult(matched=True, location="readme", found_id="2308.11197")
+        name = NameSimilarityResult(matched=True, score=0.65, containment_score=0.7, token_overlap_score=0.5, fuzzy_score=0.6)
+        author = AuthorMatchResult(matched=True, matches=[AuthorMatchDetail("jsmith", "John Smith", 0.95)])
+
+        evidence = engine._build_evidence(arxiv, name, author)
+
+        assert evidence["arxiv_id_found"] == "2308.11197"
+        assert evidence["name_similarity_score"] == 0.65
+        assert len(evidence["author_matches"]) == 1
