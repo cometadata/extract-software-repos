@@ -305,6 +305,8 @@ class TestBatchPromotionEngine:
             records, paper_index, github_data, promoted_urls
         )
 
+        assert promoted_count == 1
+
         # First record should be promoted (arxiv match + name similarity)
         assert records[0]["_promotion"]["promoted"] is True
         assert "https://github.com/owner/my-awesome-model" in promoted_urls
