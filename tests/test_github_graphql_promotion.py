@@ -127,3 +127,26 @@ class TestGitHubPromotionFetcher:
 
         assert len(results) == 1
         assert results[0].readme_content is None
+
+    def test_parse_response_handles_null_mentionable_users(self):
+        """Handle case where mentionableUsers is explicitly None."""
+        fetcher = GitHubPromotionFetcher(token="test")
+
+        response_data = {
+            "data": {
+                "repo0": {
+                    "description": "Test",
+                    "readme_md": None,
+                    "readme_rst": None,
+                    "readme_txt": None,
+                    "readme_plain": None,
+                    "mentionableUsers": None  # Explicitly None, not empty dict
+                }
+            }
+        }
+
+        urls = ["https://github.com/owner/repo"]
+        results = fetcher._parse_promotion_response(urls, response_data)
+
+        assert len(results) == 1
+        assert results[0].contributors == []

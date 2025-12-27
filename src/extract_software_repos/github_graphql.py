@@ -219,8 +219,8 @@ class GitHubPromotionFetcher:
                     break
 
             contributors = []
-            users_data = repo_data.get("mentionableUsers", {})
-            for user in users_data.get("nodes", []):
+            users_data = repo_data.get("mentionableUsers") or {}
+            for user in users_data.get("nodes") or []:
                 if user:
                     contributors.append({
                         "login": user.get("login"),
