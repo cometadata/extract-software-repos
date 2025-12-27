@@ -85,9 +85,39 @@ extract-software-repos validate enrichments.jsonl -o validated.jsonl
 - `--wait-for-ratelimit` - Auto-wait when GitHub rate limited (up to 1 hour)
 - `--keep-invalid` - Include invalid URLs in output (marked as invalid)
 
-**Performance:** ~20-40 minutes for 300K URLs (vs 5-50 hours with old method)
 
 **Resume:** If interrupted, re-run the same command. Cached URLs are skipped.
+
+### Promote to isSupplementedBy
+
+Promote validated repo links from `References` to `isSupplementedBy` when heuristics indicate the repo is the paper's official implementation.
+
+**Requires** `GITHUB_TOKEN` with `repo` and `user:email` scopes for the author matching:
+
+```bash
+export GITHUB_TOKEN=ghp_your_token_here
+extract-software-repos promote validated.jsonl \
+  --records /path/to/datacite_records.jsonl.gz \
+  -o promoted.jsonl
+```
+
+**Promotion heuristics used:**
+- arXiv ID detection: Paper's arXiv ID found in README or repo description
+- Name similarity: Repo name matches paper title
+- Author matching: Repo contributors match paper authors using the [evamxb/dev-author-em-clf](https://huggingface.co/evamxb/dev-author-em-clf) model from [sci-soft-models](https://github.com/evamaxfield/sci-soft-models) ([doi:10.5281/zenodo.17401862](https://doi.org/10.5281/zenodo.17401862))
+
+Promotion requires 2+ matching signals by default.
+
+**Options:**
+- `-o, --output PATH` - Output file (default: `<input>_promoted.jsonl`)
+- `--records PATH` - DataCite paper records (required)
+- `--record-type` - Record format: `datacite` (default)
+- `--promotion-threshold INT` - Signals required (default: 2)
+- `--name-similarity-threshold FLOAT` - Name match threshold (default: 0.45)
+- `--batch-size INT` - GitHub API batch size (default: 50)
+- `--github-cache PATH` - Cache file for GitHub data (saves/resumes fetching)
+
+**Resume:** Use `--github-cache` to save GitHub API responses. Re-running with the same cache file skips already-fetched repos.
 
 ## Output Format
 
@@ -120,8 +150,14 @@ extract-software-repos extract papers.parquet -o enrichments.jsonl --heal-fullte
 # 2. Validate URLs exist
 extract-software-repos validate enrichments.jsonl -o enrichments_valid.jsonl
 
-# 3. Use with datacite-enrichment to merge into records
-datacite-enrich merge records.jsonl.gz enrichments_valid.jsonl -o merged.jsonl
+# 3. Promote implementation repos to isSupplementedBy
+extract-software-repos promote enrichments_valid.jsonl \
+  --records records.jsonl.gz \
+  --github-cache github_cache.jsonl \
+  -o enrichments_promoted.jsonl
+
+# 4. Use with datacite-enrichment to merge into records
+datacite-enrich merge records.jsonl.gz enrichments_promoted.jsonl -o merged.jsonl
 ```
 
 ## Development
