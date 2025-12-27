@@ -257,3 +257,81 @@ class TestBatchPromotionEngine:
         # 0 signals, max possible with author = 1, can't reach threshold=3
         assert len(fast_signals) == 0
         assert needs_author is False  # No point running author matching
+
+    def test_process_chunk_skips_already_promoted_urls(self):
+        from extract_software_repos.promotion import BatchPromotionEngine
+        from extract_software_repos.paper_records import PaperInfo
+        from extract_software_repos.github_graphql import GitHubPromotionData
+
+        engine = BatchPromotionEngine(promotion_threshold=2)
+
+        records = [
+            {
+                "doi": "10.1234/a",
+                "enrichedValue": {
+                    "relatedIdentifier": "https://github.com/owner/my-awesome-model",
+                    "relationType": "References",
+                },
+                "_validation": {"is_valid": True},
+            },
+            {
+                "doi": "10.1234/b",
+                "enrichedValue": {
+                    "relatedIdentifier": "https://github.com/owner/my-awesome-model",  # Same URL
+                    "relationType": "References",
+                },
+                "_validation": {"is_valid": True},
+            },
+        ]
+
+        paper_index = {
+            "10.1234/a": PaperInfo(doi="10.1234/a", title="My Awesome Model", authors=["A"], arxiv_id="2308.11197"),
+            "10.1234/b": PaperInfo(doi="10.1234/b", title="Paper B", authors=["B"], arxiv_id="2309.00001"),
+        }
+
+        github_data = {
+            "https://github.com/owner/my-awesome-model": GitHubPromotionData(
+                url="https://github.com/owner/my-awesome-model",
+                description="Implementation of arXiv:2308.11197",
+                readme_content="# My Awesome Model\n\nSee paper: 2308.11197",
+                contributors=[],
+            ),
+        }
+
+        promoted_urls = set()
+
+        # Process chunk - should promote first record, skip second
+        promoted_count = engine.process_chunk(
+            records, paper_index, github_data, promoted_urls
+        )
+
+        # First record should be promoted (arxiv match + name similarity)
+        assert records[0]["_promotion"]["promoted"] is True
+        assert "https://github.com/owner/my-awesome-model" in promoted_urls
+
+        # Second record should be skipped
+        assert records[1]["_promotion"]["promoted"] is False
+        assert records[1]["_promotion"]["skipped"] is True
+        assert records[1]["_promotion"]["skip_reason"] == "url_already_promoted"
+
+    def test_process_chunk_non_github_unchanged(self):
+        from extract_software_repos.promotion import BatchPromotionEngine
+
+        engine = BatchPromotionEngine()
+
+        records = [
+            {
+                "doi": "10.1234/a",
+                "enrichedValue": {
+                    "relatedIdentifier": "https://gitlab.com/owner/repo",
+                    "relationType": "References",
+                },
+                "_validation": {"is_valid": True},
+            },
+        ]
+
+        promoted_urls = set()
+        promoted_count = engine.process_chunk(records, {}, {}, promoted_urls)
+
+        assert promoted_count == 0
+        assert "_promotion" not in records[0]

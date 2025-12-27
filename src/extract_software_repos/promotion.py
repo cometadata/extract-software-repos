@@ -448,3 +448,150 @@ class BatchPromotionEngine:
             needs_author = False
 
         return fast_signals, arxiv_result, name_result, needs_author
+
+    def process_chunk(
+        self,
+        chunk: List[Dict[str, Any]],
+        paper_index: Dict[str, PaperInfo],
+        github_data: Dict[str, GitHubPromotionData],
+        promoted_urls: set,
+    ) -> int:
+        """Process a chunk of records with batched evaluation.
+
+        Args:
+            chunk: List of enrichment records
+            paper_index: DOI -> PaperInfo lookup
+            github_data: URL -> GitHubPromotionData lookup
+            promoted_urls: Set of already-promoted URLs (mutated in place)
+
+        Returns:
+            Number of records promoted in this chunk
+        """
+        from .heuristics.author_matching import batch_match_authors, ContributorInfo
+
+        # Phase 1: Run fast heuristics, collect records needing author matching
+        fast_results = {}  # (url, doi) -> (signals, arxiv, name)
+        needs_author_matching = []  # Records that need author matching
+
+        for record in chunk:
+            url = record.get("enrichedValue", {}).get("relatedIdentifier", "")
+
+            # Skip non-GitHub URLs
+            if "github.com" not in url.lower():
+                continue
+
+            # Skip already promoted URLs
+            if url in promoted_urls:
+                record["_promotion"] = {
+                    "promoted": False,
+                    "skipped": True,
+                    "skip_reason": "url_already_promoted",
+                }
+                continue
+
+            # Check for required data
+            doi = normalize_doi(record.get("doi", ""))
+            paper = paper_index.get(doi)
+            promotion_data = github_data.get(url)
+
+            if not paper:
+                record["_promotion"] = {
+                    "promoted": False,
+                    "skipped": True,
+                    "skip_reason": "no_paper_record",
+                }
+                continue
+
+            if not promotion_data or promotion_data.fetch_error:
+                record["_promotion"] = {
+                    "promoted": False,
+                    "skipped": True,
+                    "skip_reason": promotion_data.fetch_error if promotion_data else "no_promotion_data",
+                }
+                continue
+
+            # Run fast heuristics
+            fast_signals, arxiv_result, name_result, needs_author = self._evaluate_fast_heuristics(
+                url, paper, promotion_data
+            )
+
+            key = (url, doi)
+            fast_results[key] = (fast_signals, arxiv_result, name_result)
+
+            if needs_author:
+                contributors = [
+                    ContributorInfo(
+                        login=c["login"],
+                        name=c.get("name"),
+                        email=c.get("email"),
+                    )
+                    for c in promotion_data.contributors
+                    if c.get("login")
+                ]
+                needs_author_matching.append({
+                    "key": key,
+                    "contributors": contributors,
+                    "authors": paper.authors,
+                })
+
+        # Phase 2: Batch author matching
+        author_results = {}
+        if needs_author_matching:
+            author_results = batch_match_authors(
+                needs_author_matching,
+                model=self._get_author_model(),
+                model_batch_size=self.model_batch_size,
+            )
+
+        # Phase 3: Apply results in record order
+        promoted_count = 0
+
+        for record in chunk:
+            url = record.get("enrichedValue", {}).get("relatedIdentifier", "")
+
+            # Skip if already processed (non-GitHub, already promoted, missing data)
+            if "_promotion" in record:
+                continue
+
+            if "github.com" not in url.lower():
+                continue
+
+            # Check if URL was promoted earlier in THIS chunk
+            if url in promoted_urls:
+                record["_promotion"] = {
+                    "promoted": False,
+                    "skipped": True,
+                    "skip_reason": "url_already_promoted",
+                }
+                continue
+
+            doi = normalize_doi(record.get("doi", ""))
+            key = (url, doi)
+
+            if key not in fast_results:
+                continue
+
+            fast_signals, arxiv_result, name_result = fast_results[key]
+            author_result = author_results.get(key)
+
+            # Compute final signals
+            signals = list(fast_signals)
+            if author_result and author_result.matched:
+                signals.append("author_match")
+
+            promoted = len(signals) >= self.promotion_threshold
+            original_relation = record.get("enrichedValue", {}).get("relationType", "References")
+
+            record["_promotion"] = {
+                "promoted": promoted,
+                "original_relation": original_relation,
+                "signals": signals,
+                "evidence": self._build_evidence(arxiv_result, name_result, author_result),
+            }
+
+            if promoted:
+                record["enrichedValue"]["relationType"] = "IsSupplementedBy"
+                promoted_urls.add(url)
+                promoted_count += 1
+
+        return promoted_count
