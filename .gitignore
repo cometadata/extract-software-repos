@@ -80,3 +80,14 @@ dmypy.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude
+.claude/
+
+# Data artifacts
+*.jsonl
+*.parquet
+docs/plans/
+
+# Submodules (reference only)
+sci-soft-models/
