@@ -350,3 +350,62 @@ class TestValidateWithPromote:
             # Full validation requires network access
             result = runner.invoke(cli, ["validate", "--help"])
             assert "--promote" in result.output
+
+
+def test_validate_promote_uses_batch_engine(tmp_path, monkeypatch):
+    """Validate --promote should use BatchPromotionEngine."""
+    import json
+    from click.testing import CliRunner
+    from extract_software_repos.cli import cli
+
+    # Create test input
+    input_file = tmp_path / "enrichments.jsonl"
+    records_file = tmp_path / "records.jsonl"
+
+    enrichments = [
+        {
+            "doi": "10.48550/arxiv.2308.11197",
+            "enrichedValue": {
+                "relatedIdentifier": "https://github.com/owner/repo",
+                "relationType": "References",
+            },
+        }
+    ]
+
+    papers = [
+        {
+            "id": "10.48550/arxiv.2308.11197",
+            "attributes": {
+                "doi": "10.48550/arxiv.2308.11197",
+                "titles": [{"title": "Test Paper"}],
+                "creators": [{"name": "John Smith"}],
+            },
+        }
+    ]
+
+    with open(input_file, "w") as f:
+        for r in enrichments:
+            f.write(json.dumps(r) + "\n")
+
+    with open(records_file, "w") as f:
+        for p in papers:
+            f.write(json.dumps(p) + "\n")
+
+    # Mock environment
+    monkeypatch.setenv("GITHUB_TOKEN", "test_token")
+
+    # This test just verifies the CLI wiring - actual batch behavior tested in unit tests
+    # We expect it to fail on missing GitHub data but not crash on import
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "validate",
+        str(input_file),
+        "--promote",
+        "--records", str(records_file),
+        "--ignore-checkpoint",
+        "-o", str(tmp_path / "output.jsonl"),
+    ])
+
+    # Should not have import errors for BatchPromotionEngine
+    assert "ImportError" not in result.output
+    assert "cannot import" not in result.output

@@ -595,7 +595,7 @@ def validate(
     # Run promotion if enabled
     if promote:
         from .paper_records import load_papers_for_dois, normalize_doi
-        from .promotion import PromotionEngine
+        from .promotion import BatchPromotionEngine
 
         click.echo("\nRunning promotion...")
 
@@ -617,58 +617,39 @@ def validate(
         # Build paper index
         paper_index = {normalize_doi(p.doi): p for p in paper_infos if p.doi}
 
-        # Run promotion engine
-        engine = PromotionEngine(
+        # Initialize batch engine
+        engine = BatchPromotionEngine(
             promotion_threshold=promotion_threshold,
             name_similarity_threshold=name_similarity_threshold,
-            batch_size=batch_size,
+            chunk_size=1000,
+            model_batch_size=256,
         )
 
+        # Process in chunks with streaming output
         promoted_count = 0
+        promoted_urls = set()
+        chunk_size = engine.chunk_size
+
         with open(output, "w", encoding="utf-8") as f:
-            with tqdm(output_records, desc="Evaluating promotion", unit="records") as pbar:
-                for record in pbar:
-                    is_valid = record.get("_validation", {}).get("is_valid")
-                    url = record.get("enrichedValue", {}).get("relatedIdentifier", "")
-                    is_github = "github.com" in url.lower() if url else False
-                    doi = record.get("doi", "")
+            with tqdm(total=len(output_records), desc="Evaluating promotion", unit="records") as pbar:
+                for chunk_start in range(0, len(output_records), chunk_size):
+                    chunk_end = min(chunk_start + chunk_size, len(output_records))
+                    chunk = output_records[chunk_start:chunk_end]
 
-                    if is_valid and is_github and doi:
-                        normalized_doi = normalize_doi(doi)
-                        paper = paper_index.get(normalized_doi)
-                        promotion_data = github_promotion_data.get(url)
+                    # Process chunk (batched inference inside)
+                    chunk_promoted = engine.process_chunk(
+                        chunk, paper_index, github_promotion_data, promoted_urls
+                    )
+                    promoted_count += chunk_promoted
 
-                        if not paper:
-                            record["_promotion"] = {
-                                "promoted": False,
-                                "skipped": True,
-                                "skip_reason": "no_paper_record",
-                            }
-                        elif not promotion_data or promotion_data.fetch_error:
-                            record["_promotion"] = {
-                                "promoted": False,
-                                "skipped": True,
-                                "skip_reason": promotion_data.fetch_error if promotion_data else "no_promotion_data",
-                            }
-                        else:
-                            result = engine._evaluate_record(record, paper, promotion_data)
-                            original_relation = record.get("enrichedValue", {}).get("relationType", "References")
+                    # Stream write for crash resilience
+                    for record in chunk:
+                        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-                            record["_promotion"] = {
-                                "promoted": result.promoted,
-                                "original_relation": original_relation,
-                                "signals": result.signals,
-                                "evidence": result.evidence,
-                            }
+                    pbar.update(len(chunk))
+                    pbar.set_postfix(promoted=promoted_count)
 
-                            if result.promoted:
-                                record["enrichedValue"]["relationType"] = "isSupplementedBy"
-                                promoted_count += 1
-                                pbar.set_postfix(promoted=promoted_count)
-
-                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-        click.echo(f"  Promoted to isSupplementedBy: {promoted_count:,}")
+        click.echo(f"  Promoted to IsSupplementedBy: {promoted_count:,}")
         click.echo(f"  Output: {output} ({len(output_records):,} records)")
 
     else:
