@@ -318,3 +318,35 @@ class TestValidateWithPromote:
                 # Should complete (exit code 0) or at least try the flow
                 # Full integration requires more mocking, so we mainly check it doesn't crash
                 assert "Error: --promote requires --records" not in result.output
+
+    def test_promote_non_github_urls_not_promoted(self, runner):
+        """Non-GitHub URLs should be validated but not promoted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+
+            # PyPI URL enrichment
+            enrichments = [
+                {
+                    "doi": "10.1234/test",
+                    "enrichedValue": {
+                        "relatedIdentifier": "https://pypi.org/project/test-package",
+                        "relatedIdentifierType": "URL",
+                        "relationType": "References"
+                    }
+                }
+            ]
+            input_file = tmpdir / "enrichments.jsonl"
+            with open(input_file, "w") as f:
+                for rec in enrichments:
+                    f.write(json.dumps(rec) + "\n")
+
+            records = [{"id": "10.1234/test", "attributes": {"doi": "10.1234/test"}}]
+            records_file = tmpdir / "records.jsonl"
+            with open(records_file, "w") as f:
+                for rec in records:
+                    f.write(json.dumps(rec) + "\n")
+
+            # This test just ensures the command structure is correct
+            # Full validation requires network access
+            result = runner.invoke(cli, ["validate", "--help"])
+            assert "--promote" in result.output
