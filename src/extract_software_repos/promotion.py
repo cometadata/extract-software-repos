@@ -398,3 +398,53 @@ class BatchPromotionEngine:
                 evidence["author_skipped"] = author_result.skip_reason
 
         return evidence
+
+    def _evaluate_fast_heuristics(
+        self,
+        url: str,
+        paper: PaperInfo,
+        promotion_data: GitHubPromotionData,
+    ) -> tuple:
+        """Run fast heuristics and determine if author matching is needed.
+
+        Args:
+            url: GitHub URL
+            paper: Paper info
+            promotion_data: GitHub data
+
+        Returns:
+            Tuple of (fast_signals, arxiv_result, name_result, needs_author_matching)
+        """
+        parsed = parse_github_url(url)
+        repo_name = parsed[1] if parsed else None
+
+        arxiv_result = detect_arxiv_id(
+            paper_arxiv_id=paper.arxiv_id,
+            readme_content=promotion_data.readme_content,
+            description=promotion_data.description,
+        )
+
+        name_result = compute_name_similarity(
+            repo_name=repo_name,
+            paper_title=paper.title,
+            threshold=self.name_similarity_threshold,
+        )
+
+        fast_signals = []
+        if arxiv_result.matched:
+            fast_signals.append(f"arxiv_id_in_{arxiv_result.location}")
+        if name_result.matched:
+            fast_signals.append("name_similarity")
+
+        # Determine if we need author matching
+        if len(fast_signals) >= self.promotion_threshold:
+            # Already have enough signals
+            needs_author = False
+        elif len(fast_signals) + 1 >= self.promotion_threshold:
+            # Could reach threshold with author match
+            needs_author = True
+        else:
+            # Can't reach threshold even with author match
+            needs_author = False
+
+        return fast_signals, arxiv_result, name_result, needs_author

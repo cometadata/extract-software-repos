@@ -161,3 +161,99 @@ class TestBatchPromotionEngine:
         assert evidence["arxiv_id_found"] == "2308.11197"
         assert evidence["name_similarity_score"] == 0.65
         assert len(evidence["author_matches"]) == 1
+
+    def test_evaluate_fast_heuristics(self):
+        from extract_software_repos.promotion import BatchPromotionEngine
+        from extract_software_repos.paper_records import PaperInfo
+        from extract_software_repos.github_graphql import GitHubPromotionData
+
+        engine = BatchPromotionEngine(promotion_threshold=2)
+
+        paper = PaperInfo(
+            doi="10.1234/a",
+            title="My Awesome Model",
+            authors=["John Smith"],
+            arxiv_id="2308.11197",
+        )
+
+        promotion_data = GitHubPromotionData(
+            url="https://github.com/owner/my-awesome-model",
+            description="Implementation of arXiv:2308.11197",
+            readme_content="# My Awesome Model\n\nSee paper: 2308.11197",
+            contributors=[{"login": "jsmith", "name": "John Smith"}],
+        )
+
+        fast_signals, arxiv_result, name_result, needs_author = engine._evaluate_fast_heuristics(
+            url="https://github.com/owner/my-awesome-model",
+            paper=paper,
+            promotion_data=promotion_data,
+        )
+
+        # Both arxiv and name should match
+        assert "arxiv_id_in_readme" in fast_signals
+        assert "name_similarity" in fast_signals
+        assert len(fast_signals) >= 2
+        assert needs_author is False  # Already have enough signals
+
+    def test_evaluate_fast_heuristics_needs_author(self):
+        from extract_software_repos.promotion import BatchPromotionEngine
+        from extract_software_repos.paper_records import PaperInfo
+        from extract_software_repos.github_graphql import GitHubPromotionData
+
+        engine = BatchPromotionEngine(promotion_threshold=2)
+
+        paper = PaperInfo(
+            doi="10.1234/a",
+            title="Unrelated Title",
+            authors=["John Smith"],
+            arxiv_id="2308.11197",
+        )
+
+        promotion_data = GitHubPromotionData(
+            url="https://github.com/owner/some-repo",
+            description="A repo",
+            readme_content="# Some Repo\n\nSee paper: 2308.11197",
+            contributors=[{"login": "jsmith", "name": "John Smith"}],
+        )
+
+        fast_signals, arxiv_result, name_result, needs_author = engine._evaluate_fast_heuristics(
+            url="https://github.com/owner/some-repo",
+            paper=paper,
+            promotion_data=promotion_data,
+        )
+
+        # Only arxiv matches, need author to reach threshold
+        assert "arxiv_id_in_readme" in fast_signals
+        assert len(fast_signals) == 1
+        assert needs_author is True
+
+    def test_evaluate_fast_heuristics_cannot_reach_threshold(self):
+        from extract_software_repos.promotion import BatchPromotionEngine
+        from extract_software_repos.paper_records import PaperInfo
+        from extract_software_repos.github_graphql import GitHubPromotionData
+
+        engine = BatchPromotionEngine(promotion_threshold=3)  # Need 3 signals
+
+        paper = PaperInfo(
+            doi="10.1234/a",
+            title="Unrelated Title",
+            authors=["John Smith"],
+            arxiv_id=None,  # No arxiv ID
+        )
+
+        promotion_data = GitHubPromotionData(
+            url="https://github.com/owner/some-repo",
+            description="A repo",
+            readme_content="# Some Repo",
+            contributors=[{"login": "jsmith", "name": "John Smith"}],
+        )
+
+        fast_signals, arxiv_result, name_result, needs_author = engine._evaluate_fast_heuristics(
+            url="https://github.com/owner/some-repo",
+            paper=paper,
+            promotion_data=promotion_data,
+        )
+
+        # 0 signals, max possible with author = 1, can't reach threshold=3
+        assert len(fast_signals) == 0
+        assert needs_author is False  # No point running author matching
