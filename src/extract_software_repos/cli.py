@@ -246,6 +246,45 @@ def _extract_parquet(
     help="Keep invalid URLs in output (marked as invalid)"
 )
 @click.option(
+    "--promote",
+    is_flag=True,
+    help="Run promotion after validation (requires --records)"
+)
+@click.option(
+    "--records",
+    type=click.Path(exists=True, path_type=Path),
+    help="Paper records file for promotion (JSONL or JSONL.gz)"
+)
+@click.option(
+    "--record-type",
+    type=click.Choice(["datacite"]),
+    default="datacite",
+    help="Record format type (default: datacite)"
+)
+@click.option(
+    "--promotion-threshold",
+    type=int,
+    default=2,
+    help="Minimum heuristic signals for promotion (default: 2)"
+)
+@click.option(
+    "--name-similarity-threshold",
+    type=float,
+    default=0.45,
+    help="Name similarity threshold (default: 0.45)"
+)
+@click.option(
+    "--batch-size",
+    type=int,
+    default=50,
+    help="GitHub API batch size for promotion (default: 50)"
+)
+@click.option(
+    "--github-cache",
+    type=click.Path(path_type=Path),
+    help="Cache file for GitHub promotion data"
+)
+@click.option(
     "--log-level",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
     default="INFO",
@@ -261,6 +300,13 @@ def validate(
     ignore_checkpoint: bool,
     wait_for_ratelimit: bool,
     keep_invalid: bool,
+    promote: bool,
+    records: Optional[Path],
+    record_type: str,
+    promotion_threshold: int,
+    name_similarity_threshold: float,
+    batch_size: int,
+    github_cache: Optional[Path],
     log_level: str,
 ):
     """Validate extracted URLs against their sources.
@@ -283,6 +329,10 @@ def validate(
 
     _setup_logging(log_level)
 
+    # Validate promote options
+    if promote and not records:
+        raise click.UsageError("--promote requires --records")
+
     if output is None:
         output = input_file.parent / f"{input_file.stem}_validated.jsonl"
 
@@ -300,16 +350,16 @@ def validate(
     click.echo(f"Workers: {workers}, HTTP concurrency: {http_concurrency}, Timeout: {timeout}s")
 
     # Load records
-    records = []
+    input_records = []
     for line in open(input_file, "r", encoding="utf-8"):
         line = line.strip()
         if line:
-            records.append(json.loads(line))
+            input_records.append(json.loads(line))
 
-    click.echo(f"Loaded {len(records):,} enrichment records")
+    click.echo(f"Loaded {len(input_records):,} enrichment records")
 
     # Deduplicate for display
-    unique_urls, url_to_records = deduplicate_urls(records)
+    unique_urls, url_to_records = deduplicate_urls(input_records)
     click.echo(f"Unique URLs: {len(unique_urls):,}")
 
     # Set up validator
@@ -332,7 +382,7 @@ def validate(
 
     # Validate
     try:
-        results = validator.validate_all(records, progress_callback)
+        results = validator.validate_all(input_records, progress_callback)
     except RateLimitExceeded as e:
         click.echo(f"\nRate limit exceeded. Resets at {e.rate_limit.reset_at}", err=True)
         click.echo(f"Progress saved to {checkpoint}. Re-run to continue.", err=True)
@@ -347,7 +397,7 @@ def validate(
     invalid_count = 0
     output_records = []
 
-    for record in records:
+    for record in input_records:
         url = record.get("enrichedValue", {}).get("relatedIdentifier")
         if not url:
             continue

@@ -163,3 +163,35 @@ class TestPromoteCommand:
         assert "--promotion-threshold" in result.output
         assert "--name-similarity-threshold" in result.output
         assert "--batch-size" in result.output
+
+
+class TestValidateWithPromote:
+    """Test validate command with --promote flag."""
+
+    def test_promote_option_exists(self, runner):
+        result = runner.invoke(cli, ["validate", "--help"])
+        assert "--promote" in result.output
+
+    def test_promote_requires_records(self, runner):
+        """--promote without --records should error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_file = Path(tmpdir) / "enrichments.jsonl"
+            input_file.write_text('{"enrichedValue": {"relatedIdentifier": "https://github.com/user/repo"}}\n')
+
+            result = runner.invoke(cli, [
+                "validate",
+                str(input_file),
+                "--promote",
+            ])
+
+            assert result.exit_code != 0
+            assert "--promote requires --records" in result.output
+
+    def test_promote_options_exist(self, runner):
+        result = runner.invoke(cli, ["validate", "--help"])
+        assert "--records" in result.output
+        assert "--record-type" in result.output
+        assert "--promotion-threshold" in result.output
+        assert "--name-similarity-threshold" in result.output
+        assert "--batch-size" in result.output
+        assert "--github-cache" in result.output
