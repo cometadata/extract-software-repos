@@ -24,8 +24,7 @@ def parse_github_url(url: str) -> Optional[Tuple[str, str]]:
 
     Returns (owner, repo) tuple or None if URL is invalid.
     """
-    # Match github.com/owner/repo with optional trailing parts
-    pattern = r"github\.com/([^/]+)/([^/?.#]+)"
+    pattern = r"github\.com/([^/]+)/([^/?#]+)"
     match = re.search(pattern, url)
 
     if not match:
@@ -51,7 +50,6 @@ def build_graphql_query(repos: List[Tuple[str, str]]) -> str:
     """
     parts = []
     for i, (owner, repo) in enumerate(repos):
-        # Escape quotes in names (shouldn't happen but be safe)
         owner_escaped = owner.replace('"', '\\"')
         repo_escaped = repo.replace('"', '\\"')
         parts.append(f'repo{i}: repository(owner: "{owner_escaped}", name: "{repo_escaped}") {{ id }}')
@@ -148,6 +146,26 @@ def build_promotion_query(repos: List[Tuple[str, str]]) -> str:
 
 PROMOTION_BATCH_SIZE = 50  # Smaller batch for heavier queries
 
+PREFLIGHT_QUERY = """query {
+    viewer { login }
+    repository(owner: "octocat", name: "Hello-World") {
+        description
+        readme_md: object(expression: "HEAD:README.md") { ... on Blob { text } }
+        mentionableUsers(first: 1) {
+            nodes { login name email }
+        }
+    }
+}"""
+
+
+class TokenScopeError(Exception):
+    """Raised when the GitHub token lacks required scopes."""
+
+    def __init__(self, message: str, required_scopes: List[str], current_scopes: List[str]):
+        self.required_scopes = required_scopes
+        self.current_scopes = current_scopes
+        super().__init__(message)
+
 
 class GitHubPromotionFetcher:
     """Fetches promotion data from GitHub repositories."""
@@ -165,6 +183,64 @@ class GitHubPromotionFetcher:
         self.batch_size = batch_size
         self.max_retries = max_retries
         self.rate_limit: Optional[RateLimitInfo] = None
+        self._preflight_passed = False
+
+    async def preflight_check(self, session: Optional[aiohttp.ClientSession] = None) -> None:
+        """Validate token has required scopes before batch processing.
+
+        Raises:
+            TokenScopeError: If token lacks required scopes
+            ValueError: If token is invalid
+        """
+        close_session = False
+        if session is None:
+            session = aiohttp.ClientSession()
+            close_session = True
+
+        try:
+            async with session.post(
+                GITHUB_GRAPHQL_URL,
+                json={"query": PREFLIGHT_QUERY},
+                headers=self._get_headers(),
+            ) as response:
+                if response.status == 401:
+                    raise ValueError("Invalid GitHub token - authentication failed")
+
+                data = await response.json()
+
+                errors = data.get("errors", [])
+                for error in errors:
+                    if error.get("type") == "INSUFFICIENT_SCOPES":
+                        msg = error.get("message", "")
+                        required = []
+                        current = []
+                        if "requires one of the following scopes:" in msg:
+                            import re
+                            req_match = re.search(r"requires one of the following scopes: \[([^\]]+)\]", msg)
+                            cur_match = re.search(r"only been granted the: \[([^\]]+)\]", msg)
+                            if req_match:
+                                required = [s.strip().strip("'") for s in req_match.group(1).split(",")]
+                            if cur_match:
+                                current = [s.strip().strip("'") for s in cur_match.group(1).split(",")]
+
+                        raise TokenScopeError(
+                            f"GitHub token lacks required scopes for promotion queries.\n"
+                            f"Required (one of): {required or ['read:user', 'user:email']}\n"
+                            f"Current scopes: {current or ['unknown']}\n"
+                            f"Please update your token at: https://github.com/settings/tokens",
+                            required_scopes=required or ["read:user", "user:email"],
+                            current_scopes=current,
+                        )
+
+                if "message" in data and "data" not in data:
+                    raise ValueError(f"GitHub API error: {data.get('message')}")
+
+                self._preflight_passed = True
+                logger.info("Preflight check passed - token has required scopes")
+
+        finally:
+            if close_session:
+                await session.close()
 
     def _get_headers(self) -> Dict[str, str]:
         return {
@@ -197,7 +273,18 @@ class GitHubPromotionFetcher:
     ) -> List[GitHubPromotionData]:
         """Parse GraphQL response into promotion data."""
         results = []
-        response_data = data.get("data", {})
+
+        if "message" in data and "data" not in data:
+            error_msg = data.get("message", "api_error")
+            logger.error(f"GitHub API error: {error_msg}")
+            for url in urls:
+                results.append(GitHubPromotionData(url=url, fetch_error="api_error"))
+            return results
+
+        response_data = data.get("data") or {}
+
+        if not response_data:
+            logger.warning(f"Empty or null 'data' in GraphQL response. Full response keys: {list(data.keys())}")
 
         for i, url in enumerate(urls):
             repo_key = f"repo{i}"
@@ -307,6 +394,7 @@ class GitHubPromotionFetcher:
         urls: List[str],
         progress_callback=None,
         batch_callback=None,
+        skip_preflight: bool = False,
     ) -> List[GitHubPromotionData]:
         """Fetch promotion data for multiple GitHub URLs.
 
@@ -314,15 +402,22 @@ class GitHubPromotionFetcher:
             urls: List of GitHub URLs
             progress_callback: Optional callback(completed, total)
             batch_callback: Optional callback(batch_results)
+            skip_preflight: Skip the preflight scope check (not recommended)
 
         Returns:
             List of promotion data
+
+        Raises:
+            TokenScopeError: If token lacks required scopes (unless skip_preflight=True)
         """
         results: List[GitHubPromotionData] = []
         total = len(urls)
         last_batch_time = 0.0
 
         async with aiohttp.ClientSession() as session:
+            if not skip_preflight and not self._preflight_passed:
+                await self.preflight_check(session)
+
             for i in range(0, total, self.batch_size):
                 elapsed = time.monotonic() - last_batch_time
                 if elapsed < MIN_BATCH_INTERVAL and last_batch_time > 0:
@@ -458,10 +553,20 @@ class GitHubGraphQLValidator:
     ) -> List[GitHubValidationResult]:
         """Parse GraphQL response into validation results."""
         results = existing_results.copy()
-        response_data = data.get("data", {})
+
+        if "message" in data and "data" not in data:
+            error_msg = data.get("message", "api_error")
+            logger.error(f"GitHub API error: {error_msg}")
+            for url in urls:
+                results.append(GitHubValidationResult(url=url, valid=False, error="api_error"))
+            return results
+
+        response_data = data.get("data") or {}
         errors = data.get("errors", [])
 
-        # Build error lookup by path
+        if not response_data:
+            logger.warning(f"Empty or null 'data' in GraphQL response. Full response keys: {list(data.keys())}")
+
         error_lookup: Dict[str, str] = {}
         for error in errors:
             path = error.get("path", [])

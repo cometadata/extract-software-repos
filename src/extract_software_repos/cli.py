@@ -331,7 +331,7 @@ def validate(
     from tqdm import tqdm
     from .validation import deduplicate_urls, categorize_urls, validate_git_repo
     from .async_validators import AsyncHTTPValidator
-    from .github_graphql import RateLimitExceeded, GitHubPromotionFetcher, GitHubPromotionData, GitHubGraphQLValidator
+    from .github_graphql import RateLimitExceeded, TokenScopeError, GitHubPromotionFetcher, GitHubPromotionData, GitHubGraphQLValidator
     from .checkpoint import CheckpointManager
 
     _setup_logging(log_level)
@@ -552,6 +552,10 @@ def validate(
                 if url in cached and url not in validation_results:
                     validation_results[url] = cached[url]
 
+    except TokenScopeError as e:
+        click.echo(f"\n{e}", err=True)
+        click.echo("\nTo fix this, update your GitHub token to include 'read:user' scope.", err=True)
+        raise SystemExit(1)
     except RateLimitExceeded as e:
         click.echo(f"\nRate limit exceeded. Resets at {e.rate_limit.reset_at}", err=True)
         click.echo(f"Progress saved to {checkpoint}. Re-run to continue.", err=True)
